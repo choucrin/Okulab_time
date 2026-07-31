@@ -62,8 +62,12 @@ export function startSession(db, roomId, press, sessionId) {
     const snap = await tx.get(cur);
     const activeId = snap.exists() ? snap.data().activeSessionId : null;
 
-    // 送信は届いていたが応答を受け取れず再送した場合
+    // 送信は届いていたが応答を受け取れず再送した場合。
+    // 進行中フラグだけでなく実体も見る(再送前に終了まで進んでいることがある)。
     if (activeId === sessionId) return { ok: true, id: sessionId, duplicate: true };
+    const existing = await tx.get(ref);
+    if (existing.exists()) return { ok: true, id: sessionId, duplicate: true };
+
     if (activeId) return { ok: false, code: "ALREADY_RUNNING" };
 
     tx.set(ref, {
@@ -103,18 +107,18 @@ export function endSession(db, roomId, press, expectedId) {
     const curSnap = await tx.get(cur);
     const activeId = curSnap.exists() ? curSnap.data().activeSessionId : null;
 
-    if (!activeId) {
-      // 送信は届いていたが応答を受け取れなかった場合、自分の書き込みが残っている
-      if (expectedId) {
-        const prev = await tx.get(sessionRef(db, roomId, expectedId));
-        if (prev.exists() && prev.data().status === "done" && prev.data().endMs === press.at) {
-          return {
-            ok: true, id: expectedId, durationMs: prev.data().durationMs, duplicate: true,
-          };
-        }
+    // 終了させるつもりだったものと、いま進行中のものが食い違う場合は
+    // 絶対に別のセッションを終了させない(再送や同時操作で起こりうる)。
+    if (expectedId && activeId !== expectedId) {
+      const prev = await tx.get(sessionRef(db, roomId, expectedId));
+      // 送信は届いていて、応答だけを受け取れなかった場合
+      if (prev.exists() && prev.data().status === "done" && prev.data().endMs === press.at) {
+        return { ok: true, id: expectedId, durationMs: prev.data().durationMs, duplicate: true };
       }
-      return { ok: false, code: "NOT_RUNNING" };
+      return { ok: false, code: activeId ? "SESSION_CHANGED" : "NOT_RUNNING" };
     }
+
+    if (!activeId) return { ok: false, code: "NOT_RUNNING" };
 
     const ref = sessionRef(db, roomId, activeId);
     const snap = await tx.get(ref);
@@ -150,15 +154,17 @@ export function abortSession(db, roomId, { uid, expectedId }) {
     const curSnap = await tx.get(cur);
     const activeId = curSnap.exists() ? curSnap.data().activeSessionId : null;
 
-    if (!activeId) {
-      if (expectedId) {
-        const prev = await tx.get(sessionRef(db, roomId, expectedId));
-        if (prev.exists() && prev.data().status === "aborted") {
-          return { ok: true, id: expectedId, duplicate: true };
-        }
+    // 中止しようとしたものと食い違う場合は、別のセッションを巻き添えにしない。
+    // expectedId が無い場合だけは「いま進行中のものを止める」強制復旧として扱う。
+    if (expectedId && activeId !== expectedId) {
+      const prev = await tx.get(sessionRef(db, roomId, expectedId));
+      if (prev.exists() && prev.data().status === "aborted") {
+        return { ok: true, id: expectedId, duplicate: true };
       }
-      return { ok: false, code: "NOT_RUNNING" };
+      return { ok: false, code: activeId ? "SESSION_CHANGED" : "NOT_RUNNING" };
     }
+
+    if (!activeId) return { ok: false, code: "NOT_RUNNING" };
 
     const ref = sessionRef(db, roomId, activeId);
     const snap = await tx.get(ref);

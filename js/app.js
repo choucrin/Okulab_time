@@ -50,6 +50,7 @@ const el = {
   statusLabel:   $("status-label"),
   statusTime:    $("status-time"),
   statusMeta:    $("status-meta"),
+  connError:     $("conn-error"),
   panelStart:    $("panel-start"),
   panelEnd:      $("panel-end"),
   inputLabel:    $("input-label"),
@@ -90,6 +91,8 @@ let stopCurrent = null;
 let ticker = null;
 let toastTimer = null;
 let missingTimer = null;
+let roomEpoch = 0;                   // ルームを離れた送信・再接続を無効化するための世代
+const connErrors = new Map();        // 購読ごとの接続エラー
 
 // ── 起動 ────────────────────────────────────────────────────
 
@@ -203,7 +206,8 @@ function bindPressButton(button, handler) {
     (event) => {
       // 2 本目以降の指で押下時刻が上書きされないようにする
       if (!event.isPrimary) return;
-      // 押している最中にボタンが有効化されることがあるため、無効中でも拾っておく
+      // disabled のボタンにはそもそもイベントが届かないため、
+      // ここに来た時点で押せる状態にある
       press = clock ? clock.snapshot() : null;
     },
     { passive: true }
@@ -296,25 +300,40 @@ function enterRoom(roomId, role) {
 
   stopSessions = watch(
     (onData, onError) => subscribeSessions(db, roomId, onData, onError),
-    onSessions
+    onSessions,
+    "sessions"
   );
   stopCurrent = watch(
     (onData, onError) => subscribeCurrent(db, roomId, onData, onError),
-    onCurrent
+    onCurrent,
+    "current"
   );
+}
+
+/**
+ * 接続エラーは操作エラーとは別枠で表示する。
+ * 同じ場所に出すと、他方の購読の復帰や次の操作で消えてしまい、
+ * 原因が分からないまま操作不能になることがある。
+ */
+function setConnError(key, message) {
+  if (message) connErrors.set(key, message);
+  else connErrors.delete(key);
+
+  const messages = [...new Set(connErrors.values())];
+  el.connError.textContent = messages.join(" ");
+  el.connError.hidden = messages.length === 0;
 }
 
 /**
  * 購読が切れたら指数バックオフで張り直す。
  * 張り直しても結果が変わらない障害(設定漏れ・権限・枠超過)では原因を表示して止める。
  */
-function watch(subscribe, onData) {
+function watch(subscribe, onData, key) {
   let stopped = false;
   let unsubscribe = null;
   let timer = null;
   let delay = 1000;
   let attempts = 0;
-  let reported = false;
 
   const attach = () => {
     if (stopped) return;
@@ -322,25 +341,24 @@ function watch(subscribe, onData) {
       (data) => {
         delay = 1000;
         attempts = 0;
-        if (reported) { reported = false; hideError(el.actionError); }
+        setConnError(key, null);
         onData(data);
       },
       (err) => {
         unsubscribe = null;
         if (stopped) return;
-        reported = true;
 
         if (!RETRYABLE.has(err?.code)) {
-          showError(el.actionError, describeError(err));
+          setConnError(key, describeError(err));
           return;
         }
         if (attempts >= MAX_RESUBSCRIBE) {
-          showError(el.actionError,
+          setConnError(key,
             "再接続を繰り返しましたが復旧しませんでした。通信状況を確認して、ページを再読み込みしてください。");
           return;
         }
         attempts += 1;
-        showError(el.actionError, `サーバーとの接続が切れました。再接続しています…(${attempts})`);
+        setConnError(key, `サーバーとの接続が切れました。再接続しています…(${attempts})`);
         timer = setTimeout(attach, delay);
         delay = Math.min(delay * 2, 15000);
       }
@@ -352,6 +370,7 @@ function watch(subscribe, onData) {
     stopped = true;
     if (timer) clearTimeout(timer);
     if (unsubscribe) unsubscribe();
+    setConnError(key, null);
   };
 }
 
@@ -363,13 +382,17 @@ function onLeave() {
   leaveRoom();
 }
 
-/** ルームに紐づく購読・タイマーをすべて止める */
+/** ルームに紐づく購読・タイマー・送信中の操作をすべて無効化する */
 function teardownRoom() {
+  roomEpoch += 1;   // 実行中の再送があっても、その結果を反映させない
   if (stopSessions) { stopSessions(); stopSessions = null; }
   if (stopCurrent) { stopCurrent(); stopCurrent = null; }
   if (clock) { clock.stop(); clock = null; }
   stopTicker();
   clearMissingTimer();
+  connErrors.clear();
+  el.connError.textContent = "";
+  el.connError.hidden = true;
 }
 
 function leaveRoom() {
@@ -637,8 +660,11 @@ async function onStart(press) {
   if (state.busy || !state.roomId) return;
   if (!press.synced && !confirmUnsynced()) return;
 
+  // 送信先は操作した時点のルームに固定する(再送中に退出・再参加されても移らない)
+  const room = state.roomId;
+  const epoch = roomEpoch;
   // 再送しても同じ記録になるよう、ID は送信前に 1 回だけ決める
-  const sessionId = newSessionId(db, state.roomId);
+  const sessionId = newSessionId(db, room);
   const payload = {
     ...press,
     label: el.inputLabel.value.trim().slice(0, 80),
@@ -646,7 +672,11 @@ async function onStart(press) {
   };
 
   await withBusy(async () => {
-    const result = await send(() => startSession(db, state.roomId, payload, sessionId));
+    const result = await send(
+      () => startSession(db, room, payload, sessionId),
+      () => epoch !== roomEpoch
+    );
+    if (epoch !== roomEpoch) return;   // 既に別のルームにいる
     if (result.ok) toast(result.duplicate ? "計測を開始しました(再送を確認)" : "計測を開始しました");
     else handleCode(result.code);
   });
@@ -656,11 +686,17 @@ async function onEnd(press) {
   if (state.busy || !state.roomId) return;
   if (!press.synced && !confirmUnsynced()) return;
 
+  const room = state.roomId;
+  const epoch = roomEpoch;
   const expectedId = state.activeId;
   const payload = { ...press, uid: state.uid };
 
   await withBusy(async () => {
-    const result = await send(() => endSession(db, state.roomId, payload, expectedId));
+    const result = await send(
+      () => endSession(db, room, payload, expectedId),
+      () => epoch !== roomEpoch
+    );
+    if (epoch !== roomEpoch) return;
     if (result.ok) {
       toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒` + (result.duplicate ? "(再送を確認)" : ""));
     } else {
@@ -679,20 +715,26 @@ function confirmUnsynced() {
 
 async function onAbort() {
   if (state.busy || !state.roomId) return;
-  if (!confirm("進行中の計測を中止します。よろしいですか?")) return;
 
+  const room = state.roomId;
+  const epoch = roomEpoch;
+  const uid = state.uid;
   const expectedId = state.activeId;
+
+  const message = expectedId
+    ? "進行中の計測を中止します。よろしいですか?"
+    : "サーバー側で進行中になっている計測を中止します。よろしいですか?";
+  if (!confirm(message)) return;
+
   await withBusy(async () => {
-    const result = await send(() =>
-      abortSession(db, state.roomId, { uid: state.uid, expectedId })
+    const result = await send(
+      () => abortSession(db, room, { uid, expectedId }),
+      () => epoch !== roomEpoch
     );
-    if (result.ok) {
-      state.abortHint = false;
-      toast("計測を中止しました");
-    } else {
-      state.abortHint = false;
-      showError(el.actionError, describeCode(result.code));
-    }
+    if (epoch !== roomEpoch) return;
+    state.abortHint = false;
+    if (result.ok) toast("計測を中止しました");
+    else showError(el.actionError, describeCode(result.code));
   });
 }
 
@@ -712,15 +754,23 @@ async function onRecordClick(event) {
  * 一時的な通信障害では押した時刻を保持したまま送り直す。
  * 押し直しを強いると「押した瞬間」が失われるため。
  */
-async function send(operation) {
+async function send(operation, cancelled = () => false) {
   const deadline = Date.now() + SEND_DEADLINE_MS;
   let delay = 400;
   for (let attempt = 1; ; attempt++) {
+    if (cancelled()) {
+      state.sending = false;
+      return { ok: false, code: "CANCELLED" };
+    }
     try {
       const result = await operation();
       state.sending = false;
       return result;
     } catch (err) {
+      if (cancelled()) {
+        state.sending = false;
+        return { ok: false, code: "CANCELLED" };
+      }
       const givingUp =
         !RETRYABLE.has(err?.code) ||
         attempt >= MAX_SEND_ATTEMPTS ||
@@ -949,6 +999,9 @@ function describeCode(code) {
     ALREADY_RUNNING: "すでに計測中です。先に終了するか、「計測を中止」で状態を戻してください。",
     NOT_RUNNING:     "進行中の計測がありません。もう一方の端末で開始してください。",
     STALE_CLEARED:   "進行中の記録が見つからなかったため、状態を初期化しました。もう一度開始してください。",
+    SESSION_CHANGED: "操作しようとした計測が、別の計測に切り替わっていました。" +
+                     "取り違えを避けるため何もしていません。画面の状態を確認してから操作し直してください。",
+    CANCELLED:       "送信を取り消しました。",
   }[code] ?? `処理できませんでした(${code})`;
 }
 

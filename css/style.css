@@ -297,11 +297,11 @@ button:focus-visible {
   font-weight: 500;
 }
 
+/* 半透明で重ねるとライトモードでコントラストが落ちるため、不透明な面に文字を置く */
 .pill--bad {
-  background: var(--surface-2);
-  background: color-mix(in srgb, var(--end) 18%, transparent);
+  background: var(--surface);
   color: var(--end);
-  border-color: transparent;
+  border: 1px solid var(--end);
   font-weight: 700;
 }
 
@@ -477,6 +477,7 @@ button:focus-visible {
 }
 
 .notice--warn { border-left: 5px solid var(--warn); }
+.notice--bad  { border-color: var(--end); border-left: 5px solid var(--end); }
 
 .toast {
   position: fixed;
