@@ -7,11 +7,12 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Okulab Time">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0b1220">
+<meta name="theme-color" content="#f4f6fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
 <meta name="format-detection" content="telephone=no">
 <title>Okulab Time — 2端末計測</title>
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="./icon.svg">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="stylesheet" href="./css/style.css">
 </head>
@@ -34,18 +35,22 @@
     <p class="lede">2端末で計測開始・終了を送信し、経過時間を記録します。</p>
 
     <form id="join-form" novalidate>
-      <label class="field">
-        <span class="field__label">合言葉(ルームキー)</span>
-        <input type="password" id="input-room" name="room" required
-               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-               placeholder="両方の端末で同じ文字列を入力">
-        <span class="field__hint">同じ合言葉を入力した端末どうしがペアになります。</span>
-      </label>
+      <div class="field">
+        <label class="field__label" for="input-room">合言葉(ルームキー)</label>
+        <div class="input-row">
+          <input type="password" id="input-room" name="room"
+                 autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                 placeholder="両方の端末で同じ文字列を入力">
+          <button type="button" class="btn btn--ghost btn--sm" id="btn-reveal"
+                  aria-pressed="false">表示</button>
+        </div>
+        <span class="field__hint">同じ合言葉を入力した端末どうしがペアになります(大文字小文字は区別しません)。</span>
+      </div>
 
       <fieldset class="roles">
         <legend class="field__label">この端末の役割</legend>
         <label class="role">
-          <input type="radio" name="role" value="start" required>
+          <input type="radio" name="role" value="start">
           <span class="role__body">
             <strong class="role__title">計測開始</strong>
             <span class="role__desc">開始ボタンを表示します</span>
@@ -73,6 +78,14 @@
   </div>
 </section>
 
+<!-- ───────── 接続中 ───────── -->
+<section id="screen-loading" class="screen" hidden>
+  <div class="card card--center">
+    <p class="loading-title">接続しています…</p>
+    <p class="muted small" id="loading-detail">Firebase に接続中</p>
+  </div>
+</section>
+
 <!-- ───────── メイン画面 ───────── -->
 <section id="screen-main" class="screen screen--main" hidden>
   <header class="topbar">
@@ -81,7 +94,7 @@
       <span class="pill pill--muted" id="pill-room">room —</span>
     </div>
     <div class="topbar__right">
-      <span class="pill pill--muted" id="pill-clock" title="サーバー時刻との同期精度">同期中…</span>
+      <span class="pill pill--muted" id="pill-clock">同期中…</span>
       <button type="button" class="btn btn--ghost btn--sm" id="btn-leave">退出</button>
     </div>
   </header>
@@ -95,6 +108,9 @@
       <div class="status__meta" id="status-meta">計測は開始されていません</div>
     </div>
 
+    <!-- 時刻同期の警告 -->
+    <p id="clock-warning" class="notice notice--warn" role="status" hidden></p>
+
     <!-- 開始パネル -->
     <div class="panel" id="panel-start" hidden>
       <label class="field">
@@ -103,9 +119,9 @@
                autocomplete="off" autocapitalize="off" spellcheck="false"
                placeholder="被験者名・条件名など">
       </label>
-      <button type="button" class="bigbtn bigbtn--start" id="btn-start">
+      <button type="button" class="bigbtn bigbtn--start" id="btn-start" disabled>
         <span class="bigbtn__title">計測開始</span>
-        <span class="bigbtn__sub">タップした瞬間を記録します</span>
+        <span class="bigbtn__sub" id="start-sub">接続中…</span>
       </button>
     </div>
 
@@ -113,7 +129,7 @@
     <div class="panel" id="panel-end" hidden>
       <button type="button" class="bigbtn bigbtn--end" id="btn-end" disabled>
         <span class="bigbtn__title">計測終了</span>
-        <span class="bigbtn__sub">タップした瞬間を記録します</span>
+        <span class="bigbtn__sub" id="end-sub">接続中…</span>
       </button>
     </div>
 
@@ -143,6 +159,9 @@
         </table>
       </div>
       <p class="empty" id="record-empty">まだ記録がありません。</p>
+      <p class="muted small" id="record-note">
+        一覧には最新 300 件を表示します。CSV 書き出しではすべての記録を出力します。
+      </p>
       <p class="muted small">
         時刻は各端末のブラウザで取得し、サーバー時刻との推定差分で補正しています。
         補正の精度はヘッダーの同期表示で確認できます。

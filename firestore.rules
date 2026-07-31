@@ -3,13 +3,19 @@ rules_version = '2';
 // ─────────────────────────────────────────────────────────────
 //  Okulab Time — Firestore セキュリティルール
 //
+//  想定する運用: 合言葉を共有した研究室内の端末どうしで使う。
+//
 //  方針:
 //   ・ログイン(匿名認証)していない端末は一切アクセスできない。
 //   ・rooms/{roomId} の roomId は合言葉の SHA-256。クライアントから
 //     コレクションを列挙する手段はないため、合言葉を知らない限り
 //     どのルームにも到達できない。
-//   ・保存されるデータの形を検証し、開始時刻の改ざんや
-//     進行中レコードの削除を防ぐ。
+//   ・保存されるデータの形を検証し、記録済みの開始時刻の改ざん、
+//     操作者の詐称、進行中レコードの削除を防ぐ。
+//
+//  なお、合言葉を知っている利用者が「もっともらしい偽の記録」を
+//  作ること自体は防げない(正規の操作と区別がつかないため)。
+//  合言葉は推測されにくい文字列にしてください。
 // ─────────────────────────────────────────────────────────────
 
 service cloud.firestore {
@@ -21,12 +27,22 @@ service cloud.firestore {
 
     // 時計同期用のプローブ。自分の分だけ読み書きできる。
     match /rooms/{roomId}/clock/{uid} {
-      allow read, write: if signedIn() && request.auth.uid == uid;
+      allow read:         if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+                            && request.resource.data.keys().hasOnly(['t']);
+      allow delete:       if signedIn() && request.auth.uid == uid;
     }
 
     // 進行中セッションの排他制御フラグ。
+    // ここが壊れると開始/終了の対応付けが崩れるため、形を固定する。
     match /rooms/{roomId}/meta/{docId} {
-      allow read, write: if signedIn();
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+          && docId == 'current'
+          && request.resource.data.keys().hasOnly(['activeSessionId', 'updatedAt'])
+          && (request.resource.data.activeSessionId == null
+              || request.resource.data.activeSessionId is string);
+      allow delete: if false;
     }
 
     // 計測記録。
@@ -40,16 +56,21 @@ service cloud.firestore {
         return incoming().status == 'running'
             && incoming().startMs is number
             && incoming().label is string
-            && incoming().label.size() <= 80
+            && incoming().label.size() <= 200
             && incoming().startedBy == request.auth.uid
             && incoming().endMs == null;
       }
 
+      // 終了(done)と中止(aborted)で書き換わるのは終了側の項目だけ。
+      // 開始時刻・ラベル・開始操作者は変更できない。
       function validUpdate() {
         return resource.data.status == 'running'
             && incoming().status in ['done', 'aborted']
-            && incoming().startMs == resource.data.startMs
-            && incoming().startedBy == resource.data.startedBy;
+            && incoming().endedBy == request.auth.uid
+            && incoming().diff(resource.data).affectedKeys().hasOnly([
+                 'status', 'endMs', 'endRawMs', 'endOffsetMs', 'endAccuracyMs',
+                 'endSynced', 'endedBy', 'endedAt', 'durationMs', 'durationSec'
+               ]);
       }
 
       allow read:   if signedIn();

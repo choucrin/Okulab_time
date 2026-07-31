@@ -15,9 +15,10 @@
 
 import {
   collection, doc, runTransaction, onSnapshot, query, orderBy, limit,
-  serverTimestamp, deleteDoc,
+  serverTimestamp, deleteDoc, getDocs,
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
+/** 画面に一覧表示する件数の上限(CSV 書き出しは全件を取り直す) */
 export const SESSION_LIMIT = 300;
 
 /** 合言葉 → ルーム ID(SHA-256) */
@@ -27,7 +28,8 @@ export async function deriveRoomId(passphrase) {
       "この環境では暗号 API が使えません。https:// または http://localhost で開いてください。"
     );
   }
-  const normalized = passphrase.normalize("NFKC").trim();
+  // 全角/半角・大文字小文字の食い違いで別ルームになるのを防ぐ
+  const normalized = passphrase.normalize("NFKC").trim().toLowerCase();
   const bytes = new TextEncoder().encode(`okulab-time:v1:${normalized}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
@@ -44,7 +46,7 @@ const sessionRef  = (db, roomId, id) => doc(db, "rooms", roomId, "sessions", id)
  * 計測を開始する。
  * @returns {Promise<{ok:true,id:string}|{ok:false,code:string}>}
  */
-export function startSession(db, roomId, { label, atMs, offsetMs, accuracyMs, uid }) {
+export function startSession(db, roomId, press) {
   const cur = currentRef(db, roomId);
   const ref = doc(sessionsCol(db, roomId));
 
@@ -55,17 +57,19 @@ export function startSession(db, roomId, { label, atMs, offsetMs, accuracyMs, ui
     }
     tx.set(ref, {
       status: "running",
-      label: label ?? "",
-      startMs: atMs,
-      startRawMs: atMs - offsetMs,   // 補正前(端末の生の Date.now())
-      startOffsetMs: offsetMs,
-      startAccuracyMs: accuracyMs,
-      startedBy: uid,
+      label: press.label ?? "",
+      startMs: press.at,
+      startRawMs: press.rawAt,          // 補正前(端末の生の Date.now())
+      startOffsetMs: press.offsetMs,
+      startAccuracyMs: press.accuracyMs,
+      startSynced: press.synced,        // false なら未補正の記録
+      startedBy: press.uid,
       startedAt: serverTimestamp(),
       endMs: null,
       endRawMs: null,
       endOffsetMs: null,
       endAccuracyMs: null,
+      endSynced: null,
       endedBy: null,
       endedAt: null,
       durationMs: null,
@@ -80,7 +84,7 @@ export function startSession(db, roomId, { label, atMs, offsetMs, accuracyMs, ui
  * 進行中の計測を終了する。
  * @returns {Promise<{ok:true,id:string,durationMs:number}|{ok:false,code:string}>}
  */
-export function endSession(db, roomId, { atMs, offsetMs, accuracyMs, uid }) {
+export function endSession(db, roomId, press) {
   const cur = currentRef(db, roomId);
 
   return runTransaction(db, async (tx) => {
@@ -96,14 +100,15 @@ export function endSession(db, roomId, { atMs, offsetMs, accuracyMs, uid }) {
       return { ok: false, code: "STALE_CLEARED" };
     }
 
-    const durationMs = atMs - snap.data().startMs;
+    const durationMs = press.at - snap.data().startMs;
     tx.update(ref, {
       status: "done",
-      endMs: atMs,
-      endRawMs: atMs - offsetMs,
-      endOffsetMs: offsetMs,
-      endAccuracyMs: accuracyMs,
-      endedBy: uid,
+      endMs: press.at,
+      endRawMs: press.rawAt,
+      endOffsetMs: press.offsetMs,
+      endAccuracyMs: press.accuracyMs,
+      endSynced: press.synced,
+      endedBy: press.uid,
       endedAt: serverTimestamp(),
       durationMs,
       durationSec: durationMs / 1000,
@@ -136,12 +141,12 @@ export function abortSession(db, roomId, { uid }) {
   });
 }
 
-/** 記録を 1 件削除する(進行中のものは削除させない) */
+/** 記録を 1 件削除する(進行中のものはルール側でも拒否される) */
 export function deleteSession(db, roomId, id) {
   return deleteDoc(sessionRef(db, roomId, id));
 }
 
-/** 記録一覧を購読する(開始時刻の新しい順) */
+/** 記録一覧を購読する(開始時刻の新しい順・最新 SESSION_LIMIT 件) */
 export function subscribeSessions(db, roomId, onData, onError) {
   const q = query(sessionsCol(db, roomId), orderBy("startMs", "desc"), limit(SESSION_LIMIT));
   return onSnapshot(
@@ -149,4 +154,22 @@ export function subscribeSessions(db, roomId, onData, onError) {
     (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     onError
   );
+}
+
+/**
+ * 進行中フラグを購読する。
+ * 一覧クエリは件数上限があるため、「計測中かどうか」はこちらを正とする。
+ */
+export function subscribeCurrent(db, roomId, onData, onError) {
+  return onSnapshot(
+    currentRef(db, roomId),
+    (snap) => onData(snap.exists() ? (snap.data().activeSessionId ?? null) : null),
+    onError
+  );
+}
+
+/** CSV 書き出し用に全件を取得する(古い順) */
+export async function fetchAllSessions(db, roomId) {
+  const snap = await getDocs(query(sessionsCol(db, roomId), orderBy("startMs", "asc")));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }

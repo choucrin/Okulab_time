@@ -9,43 +9,58 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebas
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
 import {
-  deriveRoomId, startSession, endSession, abortSession,
-  deleteSession, subscribeSessions,
+  deriveRoomId, startSession, endSession, abortSession, deleteSession,
+  subscribeSessions, subscribeCurrent, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
 const STORAGE_KEY = "okulab-time/session";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
-const PRESS_FRESH_MS = 2000; // pointerdown で拾った時刻を有効とみなす猶予
+const PRESS_FRESH_MS = 2000;  // pointerdown で拾った時刻を有効とみなす猶予
+const MAX_SEND_ATTEMPTS = 5;
+
+// 一時的な障害。押した時刻を保持したまま送り直す価値があるもの。
+const RETRYABLE = new Set(["unavailable", "deadline-exceeded", "internal", "aborted", "cancelled"]);
 
 const $ = (id) => document.getElementById(id);
 
 const el = {
-  screens:     { config: $("screen-config"), join: $("screen-join"), main: $("screen-main") },
-  configDetail: $("config-detail"),
-  joinForm:    $("join-form"),
-  inputRoom:   $("input-room"),
-  btnJoin:     $("btn-join"),
-  joinError:   $("join-error"),
-  pillRole:    $("pill-role"),
-  pillRoom:    $("pill-room"),
-  pillClock:   $("pill-clock"),
-  btnLeave:    $("btn-leave"),
-  statusCard:  $("status-card"),
-  statusLabel: $("status-label"),
-  statusTime:  $("status-time"),
-  statusMeta:  $("status-meta"),
-  panelStart:  $("panel-start"),
-  panelEnd:    $("panel-end"),
-  inputLabel:  $("input-label"),
-  btnStart:    $("btn-start"),
-  btnEnd:      $("btn-end"),
-  actionError: $("action-error"),
-  recordCount: $("record-count"),
-  recordBody:  $("record-body"),
-  recordEmpty: $("record-empty"),
-  btnAbort:    $("btn-abort"),
-  btnCsv:      $("btn-csv"),
-  toast:       $("toast"),
+  screens: {
+    config:  $("screen-config"),
+    join:    $("screen-join"),
+    loading: $("screen-loading"),
+    main:    $("screen-main"),
+  },
+  configDetail:  $("config-detail"),
+  loadingDetail: $("loading-detail"),
+  joinForm:      $("join-form"),
+  inputRoom:     $("input-room"),
+  btnReveal:     $("btn-reveal"),
+  btnJoin:       $("btn-join"),
+  joinError:     $("join-error"),
+  pillRole:      $("pill-role"),
+  pillRoom:      $("pill-room"),
+  pillClock:     $("pill-clock"),
+  clockWarning:  $("clock-warning"),
+  btnLeave:      $("btn-leave"),
+  statusCard:    $("status-card"),
+  statusLabel:   $("status-label"),
+  statusTime:    $("status-time"),
+  statusMeta:    $("status-meta"),
+  panelStart:    $("panel-start"),
+  panelEnd:      $("panel-end"),
+  inputLabel:    $("input-label"),
+  btnStart:      $("btn-start"),
+  btnEnd:        $("btn-end"),
+  startSub:      $("start-sub"),
+  endSub:        $("end-sub"),
+  actionError:   $("action-error"),
+  recordCount:   $("record-count"),
+  recordBody:    $("record-body"),
+  recordEmpty:   $("record-empty"),
+  recordNote:    $("record-note"),
+  btnAbort:      $("btn-abort"),
+  btnCsv:        $("btn-csv"),
+  toast:         $("toast"),
 };
 
 const state = {
@@ -53,15 +68,19 @@ const state = {
   roomId: null,
   role: null,
   sessions: [],
-  active: null,
+  activeId: null,        // meta/current が指す進行中セッション(これが正)
+  sessionsLoaded: false,
+  currentLoaded: false,
   busy: false,
+  sending: false,
 };
 
 let db = null;
 let auth = null;
 let authPromise = null;
 let clock = null;
-let unsubscribe = null;
+let stopSessions = null;
+let stopCurrent = null;
 let ticker = null;
 let toastTimer = null;
 
@@ -70,6 +89,10 @@ let toastTimer = null;
 main();
 
 function main() {
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[okulab-time] 未処理のエラー:", event.reason);
+  });
+
   if (!isConfigured(firebaseConfig)) {
     show("config");
     el.configDetail.textContent = "現在の projectId: " + (firebaseConfig.projectId || "(未設定)");
@@ -86,7 +109,7 @@ function main() {
     return;
   }
 
-  authPromise = signInAnonymously(auth);
+  signIn();
   bindEvents();
   restore();
 }
@@ -96,18 +119,44 @@ function isConfigured(cfg) {
   return required.every((k) => typeof cfg[k] === "string" && cfg[k] && !cfg[k].startsWith("YOUR_"));
 }
 
-function restore() {
+function signIn() {
+  authPromise = signInAnonymously(auth);
+  // 実際のエラーは await 側で扱う。ここでは未処理拒否の警告だけ抑える。
+  authPromise.catch(() => {});
+  return authPromise;
+}
+
+async function restore() {
   let saved = null;
   try {
     saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
   } catch {
     saved = null;
   }
-  if (saved?.roomId && ROLE_LABEL[saved.role]) {
-    enterRoom(saved.roomId, saved.role);
-  } else {
+
+  if (!saved?.roomId || !ROLE_LABEL[saved.role]) {
     show("join");
     el.inputRoom.focus();
+    return;
+  }
+
+  show("loading");
+  if (!(await ensureAuth(el.joinError))) return;
+  enterRoom(saved.roomId, saved.role);
+}
+
+/** 匿名認証の完了を待つ。失敗したら参加画面にエラーを出して false を返す。 */
+async function ensureAuth(errorNode) {
+  if (state.uid) return true;
+  try {
+    const cred = await authPromise;
+    state.uid = cred.user.uid;
+    return true;
+  } catch (err) {
+    show("join");
+    showError(errorNode, describeError(err));
+    signIn(); // 次回の参加操作に備えて張り直す
+    return false;
   }
 }
 
@@ -115,7 +164,8 @@ function restore() {
 
 function bindEvents() {
   el.joinForm.addEventListener("submit", onJoin);
-  el.btnLeave.addEventListener("click", leaveRoom);
+  el.btnReveal.addEventListener("click", toggleReveal);
+  el.btnLeave.addEventListener("click", onLeave);
   el.btnCsv.addEventListener("click", exportCsv);
   el.btnAbort.addEventListener("click", onAbort);
   el.recordBody.addEventListener("click", onRecordClick);
@@ -125,31 +175,46 @@ function bindEvents() {
 }
 
 /**
- * ボタンを押した「瞬間」の時刻を pointerdown で拾い、click で確定する。
+ * ボタンを押した「瞬間」の状態を pointerdown で切り出し、click で確定する。
  * click まで待つと指を離すまでの時間が誤差として乗るため。
+ *
+ * タッチ入力ではポインタが pointerup 直後に消滅し、仕様上かならず
+ * pointerleave が発火する。そのため pointerleave での取り消しは
+ * マウス操作(要素外へドラッグして離す)に限定する。
  */
 function bindPressButton(button, handler) {
-  let pressedAt = null; // { at, localAt }
+  let press = null;
 
   button.addEventListener(
     "pointerdown",
     () => {
       if (button.disabled) return;
-      pressedAt = { at: clock ? clock.now() : Date.now(), localAt: Date.now() };
+      press = clock ? clock.snapshot() : { at: Date.now(), rawAt: Date.now(), offsetMs: 0, accuracyMs: null, synced: false };
+      press.localAt = Date.now();
     },
     { passive: true }
   );
 
-  const forget = () => { pressedAt = null; };
-  button.addEventListener("pointercancel", forget, { passive: true });
-  button.addEventListener("pointerleave", forget, { passive: true });
+  button.addEventListener("pointercancel", () => { press = null; }, { passive: true });
+  button.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "mouse") press = null;
+  }, { passive: true });
 
   button.addEventListener("click", () => {
-    const fresh = pressedAt && Date.now() - pressedAt.localAt < PRESS_FRESH_MS;
-    const at = fresh ? pressedAt.at : (clock ? clock.now() : Date.now());
-    pressedAt = null;
-    handler(at);
+    const fresh = press && Date.now() - press.localAt < PRESS_FRESH_MS;
+    // キーボード操作など pointerdown を伴わない経路ではここで取り直す
+    const snapshot = fresh ? press : (clock ? clock.snapshot() : null);
+    press = null;
+    if (!snapshot) return;
+    handler(snapshot);
   });
+}
+
+function toggleReveal() {
+  const revealed = el.inputRoom.type === "text";
+  el.inputRoom.type = revealed ? "password" : "text";
+  el.btnReveal.textContent = revealed ? "表示" : "隠す";
+  el.btnReveal.setAttribute("aria-pressed", String(!revealed));
 }
 
 // ── 参加 / 退出 ─────────────────────────────────────────────
@@ -164,38 +229,35 @@ async function onJoin(event) {
   if (!passphrase) return showError(el.joinError, "合言葉を入力してください。");
   if (!role) return showError(el.joinError, "この端末の役割を選んでください。");
 
+  // 合言葉の変換は通信を伴わないので、認証より先に済ませる
+  let roomId;
+  try {
+    roomId = await deriveRoomId(passphrase);
+  } catch (err) {
+    return showError(el.joinError, describeError(err));
+  }
+
   el.btnJoin.disabled = true;
   el.btnJoin.textContent = "接続中…";
   try {
-    const cred = await authPromise;
-    state.uid = cred.user.uid;
-    const roomId = await deriveRoomId(passphrase);
+    if (!(await ensureAuth(el.joinError))) return;
     el.inputRoom.value = "";
+    if (el.inputRoom.type === "text") toggleReveal();
     enterRoom(roomId, role);
-  } catch (err) {
-    authPromise = signInAnonymously(auth).catch(() => { throw err; });
-    showError(el.joinError, describeError(err));
   } finally {
     el.btnJoin.disabled = false;
     el.btnJoin.textContent = "この端末を参加させる";
   }
 }
 
-async function enterRoom(roomId, role) {
-  // 復帰経路では認証がまだ終わっていないことがある
-  if (!state.uid) {
-    try {
-      const cred = await authPromise;
-      state.uid = cred.user.uid;
-    } catch (err) {
-      show("join");
-      showError(el.joinError, describeError(err));
-      return;
-    }
-  }
-
+function enterRoom(roomId, role) {
   state.roomId = roomId;
   state.role = role;
+  state.sessions = [];
+  state.activeId = null;
+  state.sessionsLoaded = false;
+  state.currentLoaded = false;
+
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId, role }));
   } catch { /* プライベートブラウズなどでは保存できない */ }
@@ -204,20 +266,69 @@ async function enterRoom(roomId, role) {
   el.pillRoom.textContent = "room " + roomId.slice(0, 6);
   el.panelStart.hidden = role !== "start";
   el.panelEnd.hidden = role !== "end";
+  hideError(el.actionError);
+  render();
   show("main");
 
   clock = new ClockSync(db, ["rooms", roomId, "clock", state.uid]);
-  clock.onChange = renderClock;
+  clock.onChange = () => { renderClock(); renderControls(); };
   renderClock();
   clock.start();
 
-  unsubscribe = subscribeSessions(db, roomId, onSessions, (err) => {
-    showError(el.actionError, describeError(err));
-  });
+  stopSessions = watch(
+    (onData, onError) => subscribeSessions(db, roomId, onData, onError),
+    onSessions
+  );
+  stopCurrent = watch(
+    (onData, onError) => subscribeCurrent(db, roomId, onData, onError),
+    onCurrent
+  );
+}
+
+/** 購読が切れたら指数バックオフで張り直す */
+function watch(subscribe, onData) {
+  let stopped = false;
+  let unsubscribe = null;
+  let delay = 1000;
+
+  const attach = () => {
+    if (stopped) return;
+    unsubscribe = subscribe(
+      (data) => {
+        delay = 1000;
+        hideError(el.actionError);
+        onData(data);
+      },
+      (err) => {
+        unsubscribe = null;
+        if (stopped) return;
+        if (err?.code === "permission-denied" || err?.code === "unauthenticated") {
+          showError(el.actionError, describeError(err));
+          return; // 張り直しても同じ結果になるので止める
+        }
+        showError(el.actionError, "サーバーとの接続が切れました。再接続しています…");
+        setTimeout(attach, delay);
+        delay = Math.min(delay * 2, 15000);
+      }
+    );
+  };
+
+  attach();
+  return () => {
+    stopped = true;
+    if (unsubscribe) unsubscribe();
+  };
+}
+
+function onLeave() {
+  if (state.busy) return;
+  if (!confirm("このルームから退出します。よろしいですか?")) return;
+  leaveRoom();
 }
 
 function leaveRoom() {
-  if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+  if (stopSessions) { stopSessions(); stopSessions = null; }
+  if (stopCurrent) { stopCurrent(); stopCurrent = null; }
   if (clock) { clock.stop(); clock = null; }
   stopTicker();
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
@@ -225,8 +336,13 @@ function leaveRoom() {
   state.roomId = null;
   state.role = null;
   state.sessions = [];
-  state.active = null;
+  state.activeId = null;
+  state.sessionsLoaded = false;
+  state.currentLoaded = false;
+
+  render();               // 前のルームの記録を画面に残さない
   hideError(el.actionError);
+  el.clockWarning.hidden = true;
   show("join");
   el.inputRoom.focus();
 }
@@ -235,8 +351,20 @@ function leaveRoom() {
 
 function onSessions(list) {
   state.sessions = list;
-  state.active = list.find((s) => s.status === "running") ?? null;
+  state.sessionsLoaded = true;
   render();
+}
+
+function onCurrent(activeId) {
+  state.activeId = activeId;
+  state.currentLoaded = true;
+  render();
+}
+
+/** 進行中セッションの本体(一覧の件数上限から漏れている場合は null) */
+function activeSession() {
+  if (!state.activeId) return null;
+  return state.sessions.find((s) => s.id === state.activeId) ?? null;
 }
 
 function render() {
@@ -246,10 +374,11 @@ function render() {
 }
 
 function renderStatus() {
-  const active = state.active;
-  el.statusCard.dataset.state = active ? "running" : "idle";
+  const running = Boolean(state.activeId);
+  const active = activeSession();
+  el.statusCard.dataset.state = running ? "running" : "idle";
 
-  if (!active) {
+  if (!running) {
     stopTicker();
     el.statusLabel.textContent = "待機中";
     el.statusTime.textContent = "--:--.---";
@@ -261,6 +390,14 @@ function renderStatus() {
   }
 
   el.statusLabel.textContent = "計測中";
+  if (!active) {
+    // meta/current は進行中を指しているのに本体が一覧に無い
+    stopTicker();
+    el.statusTime.textContent = "--:--.---";
+    el.statusMeta.textContent = "進行中の記録を読み込めません。「計測を中止」で状態を戻せます。";
+    return;
+  }
+
   el.statusMeta.textContent =
     `${formatClock(active.startMs)} 開始` + (active.label ? ` — ${active.label}` : "");
   startTicker();
@@ -269,8 +406,9 @@ function renderStatus() {
 function startTicker() {
   if (ticker) return;
   const update = () => {
-    if (!state.active) return;
-    el.statusTime.textContent = formatDuration(clock.now() - state.active.startMs);
+    const active = activeSession();
+    if (!active || !clock) return;
+    el.statusTime.textContent = formatDuration(clock.now() - active.startMs);
   };
   update();
   ticker = setInterval(update, 47);
@@ -282,38 +420,68 @@ function stopTicker() {
 }
 
 function renderControls() {
-  const running = Boolean(state.active);
-  el.btnStart.disabled = running || state.busy;
-  el.btnEnd.disabled = !running || state.busy;
+  const ready = state.currentLoaded;
+  const running = Boolean(state.activeId);
+  const synced = Boolean(clock?.ok);
+
+  el.btnStart.disabled = !ready || running || state.busy;
+  el.btnEnd.disabled = !ready || !running || state.busy;
   el.btnAbort.hidden = !running || state.role === "view";
+  el.btnLeave.disabled = state.busy;
+
+  el.startSub.textContent = subText(running ? "計測中です" : null, synced, ready);
+  el.endSub.textContent = subText(running ? null : "開始待ちです", synced, ready);
+}
+
+function subText(blocked, synced, ready) {
+  if (state.sending) return "送信中…(押した時刻は保持しています)";
+  if (!ready) return "接続中…";
+  if (blocked) return blocked;
+  if (!synced) return "時刻同期がまだです(押すと確認します)";
+  return "タップした瞬間を記録します";
 }
 
 function renderClock() {
   if (!clock) {
     el.pillClock.textContent = "同期待ち";
     el.pillClock.classList.remove("pill--bad");
+    el.clockWarning.hidden = true;
     return;
   }
+
   const quality = clock.quality;
   const acc = clock.accuracyMs;
-  const text = {
-    good:     () => `同期 ±${Math.round(acc)}ms`,
-    rough:    () => `同期 ±${(acc / 1000).toFixed(1)}s`,
-    stale:    () => "同期(古い)",
-    unsynced: () => "同期中…",
+  const label = {
+    good:    () => `同期 ±${Math.round(acc)}ms`,
+    rough:   () => `同期 ±${(acc / 1000).toFixed(1)}s`,
+    stale:   () => "同期(古い)",
+    failed:  () => "同期失敗",
+    pending: () => "同期中…",
   }[quality]();
-  el.pillClock.textContent = text;
-  el.pillClock.classList.toggle("pill--bad", quality === "unsynced");
-  el.pillClock.title =
-    quality === "unsynced"
-      ? "サーバー時刻と同期できていません。記録は端末時計のまま保存されます。"
-      : `サーバー時刻との推定誤差 ±${Math.round(acc)}ms / オフセット ${Math.round(clock.offsetMs)}ms`;
+
+  el.pillClock.textContent = label;
+  el.pillClock.classList.toggle("pill--bad", quality === "failed");
+
+  // title はタッチ端末では読めないので、警告は本文に出す
+  if (quality === "failed") {
+    el.clockWarning.textContent =
+      "サーバー時刻と同期できていません。このまま計測すると、端末の時計の値がそのまま記録され、" +
+      "2 台の時計のズレが誤差として残ります。通信状態を確認してください。";
+    el.clockWarning.hidden = false;
+  } else if (quality === "stale") {
+    el.clockWarning.textContent =
+      "時刻同期が古くなっています。通信が回復すると自動的に取り直します。";
+    el.clockWarning.hidden = false;
+  } else {
+    el.clockWarning.hidden = true;
+  }
 }
 
 function renderRecords() {
   const rows = state.sessions;
-  el.recordCount.textContent = String(rows.length);
-  el.recordEmpty.hidden = rows.length > 0;
+  el.recordCount.textContent = rows.length >= SESSION_LIMIT ? `${SESSION_LIMIT}+` : String(rows.length);
+  el.recordEmpty.hidden = rows.length > 0 || !state.sessionsLoaded;
+  el.recordNote.hidden = rows.length < SESSION_LIMIT;
   el.recordBody.replaceChildren();
 
   for (const s of rows) {
@@ -324,11 +492,8 @@ function renderRecords() {
     tr.append(
       cell(s.label || "—", "label-cell", s.label || ""),
       cell(formatClock(s.startMs), "mono", formatFull(s.startMs)),
-      cell(
-        s.status === "running" ? "—" : formatClock(s.endMs),
-        "mono",
-        s.endMs ? formatFull(s.endMs) : ""
-      ),
+      cell(s.status === "running" ? "—" : formatClock(s.endMs), "mono",
+           typeof s.endMs === "number" ? formatFull(s.endMs) : ""),
       durationCell(s)
     );
 
@@ -359,52 +524,65 @@ function cell(text, className = "", title = "") {
 function durationCell(s) {
   if (s.status === "running") return cell("計測中", "num");
   if (s.status === "aborted") return cell("中止", "num");
+
   const td = cell(formatSeconds(s.durationMs), "num");
   if (typeof s.durationMs === "number" && s.durationMs < 0) {
-    td.style.color = "var(--end)";
+    td.classList.add("bad");
     td.title = "終了時刻が開始時刻より前になっています。端末の時計を確認してください。";
+  } else if (s.startSynced === false || s.endSynced === false) {
+    td.classList.add("warn");
+    td.title = "時刻同期が完了していない状態で記録されました(端末時計のままの値です)。";
   }
   return td;
 }
 
 // ── 操作 ────────────────────────────────────────────────────
 
-async function onStart(atMs) {
+async function onStart(press) {
   if (state.busy || !state.roomId) return;
+  if (!press.synced && !confirmUnsynced()) return;
+
   await withBusy(async () => {
-    const result = await startSession(db, state.roomId, {
-      label: el.inputLabel.value.trim().slice(0, 80),
-      atMs,
-      offsetMs: clock.offsetMs,
-      accuracyMs: clock.ok ? clock.accuracyMs : null,
-      uid: state.uid,
-    });
+    const result = await send(() =>
+      startSession(db, state.roomId, {
+        ...press,
+        label: el.inputLabel.value.trim().slice(0, 80),
+        uid: state.uid,
+      })
+    );
     if (result.ok) toast("計測を開始しました");
-    else showError(el.actionError, describeCode(result.code));
+    else handleCode(result.code);
   });
 }
 
-async function onEnd(atMs) {
+async function onEnd(press) {
   if (state.busy || !state.roomId) return;
+  if (!press.synced && !confirmUnsynced()) return;
+
   await withBusy(async () => {
-    const result = await endSession(db, state.roomId, {
-      atMs,
-      offsetMs: clock.offsetMs,
-      accuracyMs: clock.ok ? clock.accuracyMs : null,
-      uid: state.uid,
-    });
+    const result = await send(() =>
+      endSession(db, state.roomId, { ...press, uid: state.uid })
+    );
     if (result.ok) toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒`);
-    else showError(el.actionError, describeCode(result.code));
+    else handleCode(result.code);
   });
+}
+
+function confirmUnsynced() {
+  return confirm(
+    "サーバー時刻との同期がまだ完了していません。\n" +
+    "このまま記録すると、2 台の端末の時計のズレが誤差として残ります。\n\n" +
+    "端末の時計のまま記録しますか?"
+  );
 }
 
 async function onAbort() {
-  if (!state.active) return;
+  if (!state.activeId) return;
   if (!confirm("進行中の計測を中止します。よろしいですか?")) return;
   await withBusy(async () => {
-    const result = await abortSession(db, state.roomId, { uid: state.uid });
+    const result = await send(() => abortSession(db, state.roomId, { uid: state.uid }));
     if (result.ok) toast("計測を中止しました");
-    else showError(el.actionError, describeCode(result.code));
+    else handleCode(result.code);
   });
 }
 
@@ -420,6 +598,38 @@ async function onRecordClick(event) {
   }
 }
 
+/**
+ * 一時的な通信障害では押した時刻を保持したまま送り直す。
+ * 押し直しを強いると「押した瞬間」が失われるため。
+ */
+async function send(operation) {
+  let delay = 400;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const result = await operation();
+      state.sending = false;
+      return result;
+    } catch (err) {
+      if (attempt >= MAX_SEND_ATTEMPTS || !RETRYABLE.has(err?.code)) {
+        state.sending = false;
+        throw err;
+      }
+      state.sending = true;
+      renderControls();
+      await sleep(delay);
+      delay = Math.min(delay * 2, 4000);
+    }
+  }
+}
+
+function handleCode(code) {
+  showError(el.actionError, describeCode(code));
+  if (code === "ALREADY_RUNNING" && state.role !== "view") {
+    // 状態がずれていても復旧できるよう、中止ボタンを必ず出す
+    el.btnAbort.hidden = false;
+  }
+}
+
 async function withBusy(fn) {
   state.busy = true;
   renderControls();
@@ -430,6 +640,7 @@ async function withBusy(fn) {
     showError(el.actionError, describeError(err));
   } finally {
     state.busy = false;
+    state.sending = false;
     renderControls();
   }
 }
@@ -441,53 +652,108 @@ const CSV_HEADER = [
   "start_local", "start_iso", "start_ms",
   "end_local", "end_iso", "end_ms",
   "duration_ms", "duration_sec",
-  "start_accuracy_ms", "end_accuracy_ms",
   "start_raw_ms", "end_raw_ms",
+  "start_offset_ms", "end_offset_ms",
+  "start_accuracy_ms", "end_accuracy_ms",
+  "start_synced", "end_synced",
+  "server_started_at", "server_ended_at",
   "started_by", "ended_by",
 ];
 
-function exportCsv() {
-  if (state.sessions.length === 0) return toast("書き出す記録がありません");
+async function exportCsv() {
+  if (!state.roomId) return;
+  el.btnCsv.disabled = true;
+  el.btnCsv.textContent = "取得中…";
+  try {
+    const rows = await fetchAllSessions(db, state.roomId);
+    if (rows.length === 0) return toast("書き出す記録がありません");
 
-  const rows = [...state.sessions].reverse(); // 古い順
-  const lines = [CSV_HEADER.join(",")];
-  for (const s of rows) {
-    lines.push([
-      s.id, s.label ?? "", s.status,
-      formatFull(s.startMs), toIso(s.startMs), s.startMs ?? "",
-      formatFull(s.endMs), toIso(s.endMs), s.endMs ?? "",
-      s.durationMs ?? "", s.durationMs != null ? (s.durationMs / 1000).toFixed(3) : "",
-      s.startAccuracyMs ?? "", s.endAccuracyMs ?? "",
-      s.startRawMs ?? "", s.endRawMs ?? "",
-      short(s.startedBy), short(s.endedBy),
-    ].map(csvCell).join(","));
+    const lines = [CSV_HEADER.join(",")];
+    for (const s of rows) {
+      lines.push([
+        csv(s.id), csvText(s.label), csv(s.status),
+        csv(formatFull(s.startMs)), csv(toIso(s.startMs)), csv(s.startMs),
+        csv(formatFull(s.endMs)), csv(toIso(s.endMs)), csv(s.endMs),
+        csv(s.durationMs), csv(s.durationMs != null ? (s.durationMs / 1000).toFixed(3) : ""),
+        csv(s.startRawMs), csv(s.endRawMs),
+        csv(round1(s.startOffsetMs)), csv(round1(s.endOffsetMs)),
+        csv(round1(s.startAccuracyMs)), csv(round1(s.endAccuracyMs)),
+        csv(s.startSynced), csv(s.endSynced),
+        csv(fromTimestamp(s.startedAt)), csv(fromTimestamp(s.endedAt)),
+        csv(s.startedBy), csv(s.endedBy),
+      ].join(","));
+    }
+
+    // 先頭の BOM は Excel に UTF-8 と認識させるために必要
+    const text = "﻿" + lines.join("\r\n") + "\r\n";
+    const name = `okulab-time_${state.roomId.slice(0, 6)}_${stamp()}.csv`;
+    await saveFile(name, text);
+    toast(`${rows.length} 件を書き出しました`);
+  } catch (err) {
+    showError(el.actionError, describeError(err));
+  } finally {
+    el.btnCsv.disabled = false;
+    el.btnCsv.textContent = "CSV 書き出し";
+  }
+}
+
+/**
+ * ホーム画面に追加した状態(standalone)の iOS では <a download> が
+ * 無反応になることがあるため、共有シート経由の保存を先に試す。
+ */
+async function saveFile(filename, text) {
+  const file = new File([text], filename, { type: "text/csv" });
+  const standalone =
+    window.navigator.standalone === true ||
+    window.matchMedia("(display-mode: standalone)").matches;
+
+  if (standalone && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename });
+      return;
+    } catch (err) {
+      if (err?.name === "AbortError") return; // 利用者が共有シートを閉じた
+      // それ以外は通常のダウンロードにフォールバック
+    }
   }
 
-  // 先頭の BOM は Excel が UTF-8 と認識するために必要
-  const blob = new Blob(["﻿" + lines.join("\r\n") + "\r\n"], {
-    type: "text/csv;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `okulab-time_${state.roomId.slice(0, 6)}_${stamp()}.csv`;
+  a.download = filename;
+  a.rel = "noopener";
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast(`${rows.length} 件を書き出しました`);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-function csvCell(value) {
-  const text = String(value ?? "");
+function csv(value) {
+  const text = value === null || value === undefined ? "" : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-const short = (uid) => (uid ? String(uid).slice(0, 8) : "");
+/** 自由入力の文字列。表計算ソフトに数式として解釈されないようにする。 */
+function csvText(value) {
+  let text = value === null || value === undefined ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+  return csv(text);
+}
+
+const round1 = (v) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v * 10) / 10 : "");
+
+function fromTimestamp(ts) {
+  try {
+    return ts?.toDate ? ts.toDate().toISOString() : "";
+  } catch {
+    return "";
+  }
+}
 
 // ── 表示ユーティリティ ──────────────────────────────────────
 
 const pad = (n, width = 2) => String(Math.trunc(Math.abs(n))).padStart(width, "0");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 経過時間 → M:SS.mmm(1 時間以上なら H:MM:SS.mmm) */
 function formatDuration(ms) {
@@ -512,6 +778,7 @@ function formatSeconds(ms) {
 function formatClock(ms) {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
   const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "—";
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
@@ -519,16 +786,24 @@ function formatClock(ms) {
 function formatFull(ms) {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "";
   const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
          `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
-const toIso = (ms) =>
-  typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toISOString() : "";
+function toIso(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "";
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return ""; // 表現できない範囲の値
+  }
+}
 
 function stamp() {
   const d = new Date();
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-` +
+         `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
 function show(name) {
@@ -556,7 +831,7 @@ function toast(message) {
 
 function describeCode(code) {
   return {
-    ALREADY_RUNNING: "すでに計測中です。先に終了するか、中止してください。",
+    ALREADY_RUNNING: "すでに計測中です。先に終了するか、「計測を中止」で状態を戻してください。",
     NOT_RUNNING:     "進行中の計測がありません。もう一方の端末で開始してください。",
     STALE_CLEARED:   "進行中の記録が見つからなかったため、状態を初期化しました。もう一度開始してください。",
   }[code] ?? `処理できませんでした(${code})`;
@@ -571,10 +846,21 @@ function describeError(err) {
       "サーバーに接続できません。ネットワーク状況を確認してください。",
     "failed-precondition":
       "Firestore の準備ができていません。Firebase コンソールでデータベースが作成済みか確認してください。",
+    "deadline-exceeded":
+      "サーバーの応答がありませんでした。通信状況を確認してもう一度お試しください。",
+    "cancelled":
+      "処理が中断されました。もう一度お試しください。",
+    "resource-exhausted":
+      "Firebase の無料枠の上限に達した可能性があります。時間をおいて再度お試しください。",
+    "unauthenticated":
+      "ログインが切れました。ページを再読み込みしてください。",
     "auth/configuration-not-found":
       "匿名ログインが無効です。Firebase コンソール → Authentication → Sign-in method で「匿名」を有効にしてください。",
     "auth/admin-restricted-operation":
       "匿名ログインが無効です。Firebase コンソール → Authentication → Sign-in method で「匿名」を有効にしてください。",
+    "auth/unauthorized-domain":
+      "このドメインは Firebase に許可されていません。Authentication → Settings → 承認済みドメイン に " +
+      location.hostname + " を追加してください。",
     "auth/network-request-failed":
       "認証サーバーに接続できません。ネットワーク状況を確認してください。",
     "auth/invalid-api-key":
