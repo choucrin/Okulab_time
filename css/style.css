@@ -454,13 +454,18 @@ button:focus-visible {
 
 .empty { color: var(--text-dim); font-size: 0.88rem; text-align: center; padding: 18px 0; margin: 0; }
 
+/* どの画面でも見えるよう固定表示にする(トーストとは重ならない位置) */
 .version {
+  position: fixed;
+  right: calc(var(--safe-r) + 10px);
+  bottom: calc(var(--safe-b) + 6px);
   margin: 0;
-  text-align: center;
   font-size: 0.68rem;
   color: var(--text-dim);
-  opacity: .55;
+  opacity: .5;
   letter-spacing: .04em;
+  pointer-events: none;
+  z-index: 10;
 }
 
 /* ===== エラー / トースト ===== */

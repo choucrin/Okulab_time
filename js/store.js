@@ -118,7 +118,8 @@ export function endSession(db, roomId, press, expectedId) {
         if (prev.data().endMs === press.at) {
           return { ok: true, id: expectedId, durationMs: prev.data().durationMs, duplicate: true };
         }
-        return { ok: false, code: "ALREADY_ENDED" };
+        // 別の計測が進行中なら、そちらを終了し損ねていることを伝える
+        return { ok: false, code: activeId ? "SESSION_CHANGED" : "ALREADY_ENDED" };
       }
       return { ok: false, code: activeId ? "SESSION_CHANGED" : "NOT_RUNNING" };
     }
