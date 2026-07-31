@@ -13,9 +13,9 @@
   --accent:    #2f6df0;
   --start:     #1f9d63;
   --start-ink: #ffffff;
-  --end:       #d64545;
+  --end:       #c62828;   /* 白背景で 5.4:1(WCAG AA) */
   --end-ink:   #ffffff;
-  --warn:      #b4690e;
+  --warn:      #8a5000;   /* 白背景で 6.4:1(WCAG AA) */
 
   --radius: 14px;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 6%);

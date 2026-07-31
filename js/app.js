@@ -9,14 +9,18 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebas
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
 import {
-  deriveRoomId, startSession, endSession, abortSession, deleteSession,
+  deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
 const STORAGE_KEY = "okulab-time/session";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
-const PRESS_FRESH_MS = 2000;  // pointerdown で拾った時刻を有効とみなす猶予
+const PRESS_FRESH_MS = 15000;   // pointerdown で拾った時刻を有効とみなす猶予
 const MAX_SEND_ATTEMPTS = 5;
+const SEND_DEADLINE_MS = 20000; // 再送を打ち切るまでの上限
+const MAX_RESUBSCRIBE = 8;      // 購読の張り直し回数の上限
+const MISSING_GRACE_MS = 1500;  // 進行中の実体待ちを不整合と判断するまでの猶予
+const GOOD_ACCURACY_MS = 250;   // 時刻補正がこれより粗い記録には注意を出す
 
 // 一時的な障害。押した時刻を保持したまま送り直す価値があるもの。
 const RETRYABLE = new Set(["unavailable", "deadline-exceeded", "internal", "aborted", "cancelled"]);
@@ -73,6 +77,8 @@ const state = {
   currentLoaded: false,
   busy: false,
   sending: false,
+  abortHint: false,    // 状態のずれを検知し、中止での復旧を促している
+  showMissing: false,  // 進行中フラグに対応する記録が読み込めていない
 };
 
 let db = null;
@@ -83,6 +89,7 @@ let stopSessions = null;
 let stopCurrent = null;
 let ticker = null;
 let toastTimer = null;
+let missingTimer = null;
 
 // ── 起動 ────────────────────────────────────────────────────
 
@@ -141,7 +148,13 @@ async function restore() {
   }
 
   show("loading");
-  if (!(await ensureAuth(el.joinError))) return;
+  const slow = setTimeout(() => {
+    el.loadingDetail.textContent = "接続に時間がかかっています。通信状況を確認してください。";
+  }, 4000);
+  const authorized = await ensureAuth(el.joinError);
+  clearTimeout(slow);
+  el.loadingDetail.textContent = "Firebase に接続中";
+  if (!authorized) return;
   enterRoom(saved.roomId, saved.role);
 }
 
@@ -187,10 +200,11 @@ function bindPressButton(button, handler) {
 
   button.addEventListener(
     "pointerdown",
-    () => {
-      if (button.disabled) return;
-      press = clock ? clock.snapshot() : { at: Date.now(), rawAt: Date.now(), offsetMs: 0, accuracyMs: null, synced: false };
-      press.localAt = Date.now();
+    (event) => {
+      // 2 本目以降の指で押下時刻が上書きされないようにする
+      if (!event.isPrimary) return;
+      // 押している最中にボタンが有効化されることがあるため、無効中でも拾っておく
+      press = clock ? clock.snapshot() : null;
     },
     { passive: true }
   );
@@ -201,7 +215,8 @@ function bindPressButton(button, handler) {
   }, { passive: true });
 
   button.addEventListener("click", () => {
-    const fresh = press && Date.now() - press.localAt < PRESS_FRESH_MS;
+    // 鮮度の判定には、OS の時刻補正で飛ばない performance.now() を使う
+    const fresh = press && performance.now() - press.perfAt < PRESS_FRESH_MS;
     // キーボード操作など pointerdown を伴わない経路ではここで取り直す
     const snapshot = fresh ? press : (clock ? clock.snapshot() : null);
     press = null;
@@ -251,12 +266,16 @@ async function onJoin(event) {
 }
 
 function enterRoom(roomId, role) {
+  teardownRoom();   // 二重購読を防ぐ
+
   state.roomId = roomId;
   state.role = role;
   state.sessions = [];
   state.activeId = null;
   state.sessionsLoaded = false;
   state.currentLoaded = false;
+  state.abortHint = false;
+  state.showMissing = false;
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId, role }));
@@ -285,29 +304,44 @@ function enterRoom(roomId, role) {
   );
 }
 
-/** 購読が切れたら指数バックオフで張り直す */
+/**
+ * 購読が切れたら指数バックオフで張り直す。
+ * 張り直しても結果が変わらない障害(設定漏れ・権限・枠超過)では原因を表示して止める。
+ */
 function watch(subscribe, onData) {
   let stopped = false;
   let unsubscribe = null;
+  let timer = null;
   let delay = 1000;
+  let attempts = 0;
+  let reported = false;
 
   const attach = () => {
     if (stopped) return;
     unsubscribe = subscribe(
       (data) => {
         delay = 1000;
-        hideError(el.actionError);
+        attempts = 0;
+        if (reported) { reported = false; hideError(el.actionError); }
         onData(data);
       },
       (err) => {
         unsubscribe = null;
         if (stopped) return;
-        if (err?.code === "permission-denied" || err?.code === "unauthenticated") {
+        reported = true;
+
+        if (!RETRYABLE.has(err?.code)) {
           showError(el.actionError, describeError(err));
-          return; // 張り直しても同じ結果になるので止める
+          return;
         }
-        showError(el.actionError, "サーバーとの接続が切れました。再接続しています…");
-        setTimeout(attach, delay);
+        if (attempts >= MAX_RESUBSCRIBE) {
+          showError(el.actionError,
+            "再接続を繰り返しましたが復旧しませんでした。通信状況を確認して、ページを再読み込みしてください。");
+          return;
+        }
+        attempts += 1;
+        showError(el.actionError, `サーバーとの接続が切れました。再接続しています…(${attempts})`);
+        timer = setTimeout(attach, delay);
         delay = Math.min(delay * 2, 15000);
       }
     );
@@ -316,21 +350,30 @@ function watch(subscribe, onData) {
   attach();
   return () => {
     stopped = true;
+    if (timer) clearTimeout(timer);
     if (unsubscribe) unsubscribe();
   };
 }
 
 function onLeave() {
-  if (state.busy) return;
-  if (!confirm("このルームから退出します。よろしいですか?")) return;
+  const message = state.busy
+    ? "送信中の操作があります。中断してこのルームから退出しますか?"
+    : "このルームから退出します。よろしいですか?";
+  if (!confirm(message)) return;
   leaveRoom();
 }
 
-function leaveRoom() {
+/** ルームに紐づく購読・タイマーをすべて止める */
+function teardownRoom() {
   if (stopSessions) { stopSessions(); stopSessions = null; }
   if (stopCurrent) { stopCurrent(); stopCurrent = null; }
   if (clock) { clock.stop(); clock = null; }
   stopTicker();
+  clearMissingTimer();
+}
+
+function leaveRoom() {
+  teardownRoom();
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
 
   state.roomId = null;
@@ -339,6 +382,10 @@ function leaveRoom() {
   state.activeId = null;
   state.sessionsLoaded = false;
   state.currentLoaded = false;
+  state.busy = false;
+  state.sending = false;
+  state.abortHint = false;
+  state.showMissing = false;
 
   render();               // 前のルームの記録を画面に残さない
   hideError(el.actionError);
@@ -356,9 +403,34 @@ function onSessions(list) {
 }
 
 function onCurrent(activeId) {
+  if (activeId !== state.activeId) {
+    state.abortHint = false;
+    state.showMissing = false;
+    clearMissingTimer();
+  }
   state.activeId = activeId;
   state.currentLoaded = true;
   render();
+}
+
+/**
+ * 2 つの購読は独立しているため、進行中フラグが記録本体より先に届くことがある。
+ * すぐ不整合と決めつけず、猶予を置いてから警告する。
+ */
+function scheduleMissingCheck() {
+  if (missingTimer || state.showMissing) return;
+  missingTimer = setTimeout(() => {
+    missingTimer = null;
+    if (state.activeId && !activeSession()) {
+      state.showMissing = true;
+      render();
+    }
+  }, MISSING_GRACE_MS);
+}
+
+function clearMissingTimer() {
+  if (missingTimer) clearTimeout(missingTimer);
+  missingTimer = null;
 }
 
 /** 進行中セッションの本体(一覧の件数上限から漏れている場合は null) */
@@ -391,13 +463,20 @@ function renderStatus() {
 
   el.statusLabel.textContent = "計測中";
   if (!active) {
-    // meta/current は進行中を指しているのに本体が一覧に無い
+    // meta/current は進行中を指しているのに本体が届いていない
     stopTicker();
     el.statusTime.textContent = "--:--.---";
-    el.statusMeta.textContent = "進行中の記録を読み込めません。「計測を中止」で状態を戻せます。";
+    if (state.showMissing) {
+      el.statusMeta.textContent = "進行中の記録を読み込めません。「計測を中止」で状態を戻せます。";
+    } else {
+      el.statusMeta.textContent = "記録を読み込んでいます…";
+      scheduleMissingCheck();
+    }
     return;
   }
 
+  clearMissingTimer();
+  state.showMissing = false;
   el.statusMeta.textContent =
     `${formatClock(active.startMs)} 開始` + (active.label ? ` — ${active.label}` : "");
   startTicker();
@@ -426,8 +505,10 @@ function renderControls() {
 
   el.btnStart.disabled = !ready || running || state.busy;
   el.btnEnd.disabled = !ready || !running || state.busy;
-  el.btnAbort.hidden = !running || state.role === "view";
-  el.btnLeave.disabled = state.busy;
+  // 状態がずれているときは、進行中フラグが読めていなくても復旧できるように出す
+  el.btnAbort.hidden = (!running && !state.abortHint) || state.role === "view";
+  // 送信中の中止は、確定寸前の押下時刻を捨ててしまうので受け付けない
+  el.btnAbort.disabled = state.busy;
 
   el.startSub.textContent = subText(running ? "計測中です" : null, synced, ready);
   el.endSub.textContent = subText(running ? null : "開始待ちです", synced, ready);
@@ -529,11 +610,25 @@ function durationCell(s) {
   if (typeof s.durationMs === "number" && s.durationMs < 0) {
     td.classList.add("bad");
     td.title = "終了時刻が開始時刻より前になっています。端末の時計を確認してください。";
-  } else if (s.startSynced === false || s.endSynced === false) {
+    return td;
+  }
+
+  const worst = worstAccuracy(s);
+  if (s.startSynced === false || s.endSynced === false) {
     td.classList.add("warn");
     td.title = "時刻同期が完了していない状態で記録されました(端末時計のままの値です)。";
+  } else if (worst !== null && worst > GOOD_ACCURACY_MS) {
+    td.classList.add("warn");
+    td.title = `時刻補正の推定誤差が大きい状態で記録されました(±${Math.round(worst)}ms)。`;
   }
   return td;
+}
+
+/** 開始側・終了側のうち精度が悪いほうの推定誤差 */
+function worstAccuracy(s) {
+  const values = [s.startAccuracyMs, s.endAccuracyMs]
+    .filter((v) => typeof v === "number" && Number.isFinite(v));
+  return values.length ? Math.max(...values) : null;
 }
 
 // ── 操作 ────────────────────────────────────────────────────
@@ -542,15 +637,17 @@ async function onStart(press) {
   if (state.busy || !state.roomId) return;
   if (!press.synced && !confirmUnsynced()) return;
 
+  // 再送しても同じ記録になるよう、ID は送信前に 1 回だけ決める
+  const sessionId = newSessionId(db, state.roomId);
+  const payload = {
+    ...press,
+    label: el.inputLabel.value.trim().slice(0, 80),
+    uid: state.uid,
+  };
+
   await withBusy(async () => {
-    const result = await send(() =>
-      startSession(db, state.roomId, {
-        ...press,
-        label: el.inputLabel.value.trim().slice(0, 80),
-        uid: state.uid,
-      })
-    );
-    if (result.ok) toast("計測を開始しました");
+    const result = await send(() => startSession(db, state.roomId, payload, sessionId));
+    if (result.ok) toast(result.duplicate ? "計測を開始しました(再送を確認)" : "計測を開始しました");
     else handleCode(result.code);
   });
 }
@@ -559,12 +656,16 @@ async function onEnd(press) {
   if (state.busy || !state.roomId) return;
   if (!press.synced && !confirmUnsynced()) return;
 
+  const expectedId = state.activeId;
+  const payload = { ...press, uid: state.uid };
+
   await withBusy(async () => {
-    const result = await send(() =>
-      endSession(db, state.roomId, { ...press, uid: state.uid })
-    );
-    if (result.ok) toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒`);
-    else handleCode(result.code);
+    const result = await send(() => endSession(db, state.roomId, payload, expectedId));
+    if (result.ok) {
+      toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒` + (result.duplicate ? "(再送を確認)" : ""));
+    } else {
+      handleCode(result.code);
+    }
   });
 }
 
@@ -577,12 +678,21 @@ function confirmUnsynced() {
 }
 
 async function onAbort() {
-  if (!state.activeId) return;
+  if (state.busy || !state.roomId) return;
   if (!confirm("進行中の計測を中止します。よろしいですか?")) return;
+
+  const expectedId = state.activeId;
   await withBusy(async () => {
-    const result = await send(() => abortSession(db, state.roomId, { uid: state.uid }));
-    if (result.ok) toast("計測を中止しました");
-    else handleCode(result.code);
+    const result = await send(() =>
+      abortSession(db, state.roomId, { uid: state.uid, expectedId })
+    );
+    if (result.ok) {
+      state.abortHint = false;
+      toast("計測を中止しました");
+    } else {
+      state.abortHint = false;
+      showError(el.actionError, describeCode(result.code));
+    }
   });
 }
 
@@ -603,6 +713,7 @@ async function onRecordClick(event) {
  * 押し直しを強いると「押した瞬間」が失われるため。
  */
 async function send(operation) {
+  const deadline = Date.now() + SEND_DEADLINE_MS;
   let delay = 400;
   for (let attempt = 1; ; attempt++) {
     try {
@@ -610,7 +721,11 @@ async function send(operation) {
       state.sending = false;
       return result;
     } catch (err) {
-      if (attempt >= MAX_SEND_ATTEMPTS || !RETRYABLE.has(err?.code)) {
+      const givingUp =
+        !RETRYABLE.has(err?.code) ||
+        attempt >= MAX_SEND_ATTEMPTS ||
+        Date.now() + delay > deadline;
+      if (givingUp) {
         state.sending = false;
         throw err;
       }
@@ -625,8 +740,8 @@ async function send(operation) {
 function handleCode(code) {
   showError(el.actionError, describeCode(code));
   if (code === "ALREADY_RUNNING" && state.role !== "view") {
-    // 状態がずれていても復旧できるよう、中止ボタンを必ず出す
-    el.btnAbort.hidden = false;
+    // 進行中フラグが読めていなくても中止で復旧できるようにする
+    state.abortHint = true;
   }
 }
 

@@ -43,18 +43,29 @@ const sessionsCol = (db, roomId) => collection(db, "rooms", roomId, "sessions");
 const sessionRef  = (db, roomId, id) => doc(db, "rooms", roomId, "sessions", id);
 
 /**
- * 計測を開始する。
- * @returns {Promise<{ok:true,id:string}|{ok:false,code:string}>}
+ * 新しいセッション ID を先に採番する。
+ * 送信を再試行しても同じ ID を使うことで、二重登録を防ぐ。
  */
-export function startSession(db, roomId, press) {
+export function newSessionId(db, roomId) {
+  return doc(sessionsCol(db, roomId)).id;
+}
+
+/**
+ * 計測を開始する。
+ * @returns {Promise<{ok:true,id:string,duplicate?:boolean}|{ok:false,code:string}>}
+ */
+export function startSession(db, roomId, press, sessionId) {
   const cur = currentRef(db, roomId);
-  const ref = doc(sessionsCol(db, roomId));
+  const ref = doc(sessionsCol(db, roomId), sessionId);
 
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(cur);
-    if (snap.exists() && snap.data().activeSessionId) {
-      return { ok: false, code: "ALREADY_RUNNING" };
-    }
+    const activeId = snap.exists() ? snap.data().activeSessionId : null;
+
+    // 送信は届いていたが応答を受け取れず再送した場合
+    if (activeId === sessionId) return { ok: true, id: sessionId, duplicate: true };
+    if (activeId) return { ok: false, code: "ALREADY_RUNNING" };
+
     tx.set(ref, {
       status: "running",
       label: press.label ?? "",
@@ -75,22 +86,35 @@ export function startSession(db, roomId, press) {
       durationMs: null,
       durationSec: null,
     });
-    tx.set(cur, { activeSessionId: ref.id, updatedAt: serverTimestamp() });
-    return { ok: true, id: ref.id };
+    tx.set(cur, { activeSessionId: sessionId, updatedAt: serverTimestamp() });
+    return { ok: true, id: sessionId };
   });
 }
 
 /**
  * 進行中の計測を終了する。
- * @returns {Promise<{ok:true,id:string,durationMs:number}|{ok:false,code:string}>}
+ * @param {string|null} expectedId 終了させるつもりだったセッション(再送の判定に使う)
+ * @returns {Promise<{ok:true,id:string,durationMs:number,duplicate?:boolean}|{ok:false,code:string}>}
  */
-export function endSession(db, roomId, press) {
+export function endSession(db, roomId, press, expectedId) {
   const cur = currentRef(db, roomId);
 
   return runTransaction(db, async (tx) => {
     const curSnap = await tx.get(cur);
     const activeId = curSnap.exists() ? curSnap.data().activeSessionId : null;
-    if (!activeId) return { ok: false, code: "NOT_RUNNING" };
+
+    if (!activeId) {
+      // 送信は届いていたが応答を受け取れなかった場合、自分の書き込みが残っている
+      if (expectedId) {
+        const prev = await tx.get(sessionRef(db, roomId, expectedId));
+        if (prev.exists() && prev.data().status === "done" && prev.data().endMs === press.at) {
+          return {
+            ok: true, id: expectedId, durationMs: prev.data().durationMs, duplicate: true,
+          };
+        }
+      }
+      return { ok: false, code: "NOT_RUNNING" };
+    }
 
     const ref = sessionRef(db, roomId, activeId);
     const snap = await tx.get(ref);
@@ -119,13 +143,22 @@ export function endSession(db, roomId, press) {
 }
 
 /** 進行中の計測を破棄する(誤操作の復旧用) */
-export function abortSession(db, roomId, { uid }) {
+export function abortSession(db, roomId, { uid, expectedId }) {
   const cur = currentRef(db, roomId);
 
   return runTransaction(db, async (tx) => {
     const curSnap = await tx.get(cur);
     const activeId = curSnap.exists() ? curSnap.data().activeSessionId : null;
-    if (!activeId) return { ok: false, code: "NOT_RUNNING" };
+
+    if (!activeId) {
+      if (expectedId) {
+        const prev = await tx.get(sessionRef(db, roomId, expectedId));
+        if (prev.exists() && prev.data().status === "aborted") {
+          return { ok: true, id: expectedId, duplicate: true };
+        }
+      }
+      return { ok: false, code: "NOT_RUNNING" };
+    }
 
     const ref = sessionRef(db, roomId, activeId);
     const snap = await tx.get(ref);

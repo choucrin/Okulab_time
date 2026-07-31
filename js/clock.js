@@ -27,7 +27,7 @@ const RESYNC_ROUNDS    = 3;
 const RESYNC_EVERY_MS  = 4 * 60 * 1000; // 定期再同期
 const STALE_AFTER_MS   = 6 * 60 * 1000; // これを超えたら「古い」扱い
 const GOOD_ACCURACY_MS = 250;           // これ以下なら良好とみなす
-const MAX_ACCURACY_MS  = 5000;          // これを超える標本は捨てる
+const MAX_ACCURACY_MS  = 1000;          // これを超える標本は精度が低すぎるので捨てる
 const MAX_OFFSET_MS    = 400 * 24 * 60 * 60 * 1000; // 明らかに異常な標本を捨てる
 
 export class ClockSync {
@@ -62,14 +62,22 @@ export class ClockSync {
     return Math.round(Date.now() + this.offsetMs);
   }
 
-  /** 押下時点の補正状態をまとめて切り出す(後から読み直すとズレるため) */
+  /**
+   * 押下時点の補正状態をまとめて切り出す(後から読み直すとズレるため)。
+   * 壁時計は 1 回だけ読み、補正前後の値が必ず対応するようにする。
+   */
   snapshot() {
+    const wall = Date.now();
+    const quality = this.quality;
     return {
-      at: this.now(),
-      rawAt: Date.now(),
+      at: Math.round(wall + this.offsetMs),
+      rawAt: wall,
+      perfAt: performance.now(),
       offsetMs: this.offsetMs,
       accuracyMs: this.ok ? this.accuracyMs : null,
-      synced: this.ok,
+      // 同期が古いまま適用した場合も「補正済み」とは扱わない
+      synced: this.ok && quality !== "stale",
+      quality,
     };
   }
 

@@ -58,7 +58,15 @@ service cloud.firestore {
             && incoming().label is string
             && incoming().label.size() <= 200
             && incoming().startedBy == request.auth.uid
-            && incoming().endMs == null;
+            && incoming().endMs == null
+            && incoming().keys().hasOnly([
+                 'status', 'label',
+                 'startMs', 'startRawMs', 'startOffsetMs', 'startAccuracyMs',
+                 'startSynced', 'startedBy', 'startedAt',
+                 'endMs', 'endRawMs', 'endOffsetMs', 'endAccuracyMs',
+                 'endSynced', 'endedBy', 'endedAt',
+                 'durationMs', 'durationSec'
+               ]);
       }
 
       // 終了(done)と中止(aborted)で書き換わるのは終了側の項目だけ。
