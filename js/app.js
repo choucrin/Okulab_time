@@ -13,6 +13,8 @@ import {
   subscribeSessions, subscribeCurrent, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
+export const APP_VERSION = "v.01.0";
+
 const STORAGE_KEY = "okulab-time/session";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
 const PRESS_FRESH_MS = 15000;   // pointerdown で拾った時刻を有効とみなす猶予
@@ -65,6 +67,7 @@ const el = {
   recordNote:    $("record-note"),
   btnAbort:      $("btn-abort"),
   btnCsv:        $("btn-csv"),
+  version:       $("version"),
   toast:         $("toast"),
 };
 
@@ -99,6 +102,8 @@ const connErrors = new Map();        // 購読ごとの接続エラー
 main();
 
 function main() {
+  el.version.textContent = APP_VERSION;
+
   window.addEventListener("unhandledrejection", (event) => {
     console.error("[okulab-time] 未処理のエラー:", event.reason);
   });
@@ -339,6 +344,7 @@ function watch(subscribe, onData, key) {
     if (stopped) return;
     unsubscribe = subscribe(
       (data) => {
+        if (stopped) return;   // 解除直後に届いたスナップショットを反映しない
         delay = 1000;
         attempts = 0;
         setConnError(key, null);
@@ -376,7 +382,8 @@ function watch(subscribe, onData, key) {
 
 function onLeave() {
   const message = state.busy
-    ? "送信中の操作があります。中断してこのルームから退出しますか?"
+    ? "送信中の操作があります。中断してこのルームから退出しますか?\n" +
+      "(すでにサーバーに届いていた場合、その操作は記録として残ります)"
     : "このルームから退出します。よろしいですか?";
   if (!confirm(message)) return;
   leaveRoom();
@@ -677,9 +684,14 @@ async function onStart(press) {
       () => epoch !== roomEpoch
     );
     if (epoch !== roomEpoch) return;   // 既に別のルームにいる
-    if (result.ok) toast(result.duplicate ? "計測を開始しました(再送を確認)" : "計測を開始しました");
-    else handleCode(result.code);
-  });
+    if (!result.ok) return handleCode(result.code);
+
+    if (result.duplicate && result.status && result.status !== "running") {
+      toast("この計測は既に終了しています(再送を確認)");
+    } else {
+      toast(result.duplicate ? "計測を開始しました(再送を確認)" : "計測を開始しました");
+    }
+  }, epoch);
 }
 
 async function onEnd(press) {
@@ -702,7 +714,7 @@ async function onEnd(press) {
     } else {
       handleCode(result.code);
     }
-  });
+  }, epoch);
 }
 
 function confirmUnsynced() {
@@ -735,7 +747,7 @@ async function onAbort() {
     state.abortHint = false;
     if (result.ok) toast("計測を中止しました");
     else showError(el.actionError, describeCode(result.code));
-  });
+  }, epoch);
 }
 
 async function onRecordClick(event) {
@@ -757,28 +769,18 @@ async function onRecordClick(event) {
 async function send(operation, cancelled = () => false) {
   const deadline = Date.now() + SEND_DEADLINE_MS;
   let delay = 400;
+  // state.sending を戻すのは withBusy の役目(世代が変わっていたら触らないため)
   for (let attempt = 1; ; attempt++) {
-    if (cancelled()) {
-      state.sending = false;
-      return { ok: false, code: "CANCELLED" };
-    }
+    if (cancelled()) return { ok: false, code: "CANCELLED" };
     try {
-      const result = await operation();
-      state.sending = false;
-      return result;
+      return await operation();
     } catch (err) {
-      if (cancelled()) {
-        state.sending = false;
-        return { ok: false, code: "CANCELLED" };
-      }
+      if (cancelled()) return { ok: false, code: "CANCELLED" };
       const givingUp =
         !RETRYABLE.has(err?.code) ||
         attempt >= MAX_SEND_ATTEMPTS ||
         Date.now() + delay > deadline;
-      if (givingUp) {
-        state.sending = false;
-        throw err;
-      }
+      if (givingUp) throw err;
       state.sending = true;
       renderControls();
       await sleep(delay);
@@ -795,18 +797,24 @@ function handleCode(code) {
   }
 }
 
-async function withBusy(fn) {
+/**
+ * @param {number} epoch 操作を始めた時点のルーム世代。
+ *   退出後に古い送信が終わっても、新しいルームの状態を触らないようにする。
+ */
+async function withBusy(fn, epoch = roomEpoch) {
   state.busy = true;
   renderControls();
   hideError(el.actionError);
   try {
     await fn();
   } catch (err) {
-    showError(el.actionError, describeError(err));
+    if (epoch === roomEpoch) showError(el.actionError, describeError(err));
   } finally {
-    state.busy = false;
-    state.sending = false;
-    renderControls();
+    if (epoch === roomEpoch) {
+      state.busy = false;
+      state.sending = false;
+      renderControls();
+    }
   }
 }
 
@@ -1001,7 +1009,7 @@ function describeCode(code) {
     STALE_CLEARED:   "進行中の記録が見つからなかったため、状態を初期化しました。もう一度開始してください。",
     SESSION_CHANGED: "操作しようとした計測が、別の計測に切り替わっていました。" +
                      "取り違えを避けるため何もしていません。画面の状態を確認してから操作し直してください。",
-    CANCELLED:       "送信を取り消しました。",
+    ALREADY_ENDED:   "この計測は、すでに別の端末で終了しています。",
   }[code] ?? `処理できませんでした(${code})`;
 }
 

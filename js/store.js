@@ -66,7 +66,9 @@ export function startSession(db, roomId, press, sessionId) {
     // 進行中フラグだけでなく実体も見る(再送前に終了まで進んでいることがある)。
     if (activeId === sessionId) return { ok: true, id: sessionId, duplicate: true };
     const existing = await tx.get(ref);
-    if (existing.exists()) return { ok: true, id: sessionId, duplicate: true };
+    if (existing.exists()) {
+      return { ok: true, id: sessionId, duplicate: true, status: existing.data().status };
+    }
 
     if (activeId) return { ok: false, code: "ALREADY_RUNNING" };
 
@@ -111,9 +113,12 @@ export function endSession(db, roomId, press, expectedId) {
     // 絶対に別のセッションを終了させない(再送や同時操作で起こりうる)。
     if (expectedId && activeId !== expectedId) {
       const prev = await tx.get(sessionRef(db, roomId, expectedId));
-      // 送信は届いていて、応答だけを受け取れなかった場合
-      if (prev.exists() && prev.data().status === "done" && prev.data().endMs === press.at) {
-        return { ok: true, id: expectedId, durationMs: prev.data().durationMs, duplicate: true };
+      if (prev.exists() && prev.data().status === "done") {
+        // 押した時刻が一致する = 送信は届いていて応答だけを受け取れなかった
+        if (prev.data().endMs === press.at) {
+          return { ok: true, id: expectedId, durationMs: prev.data().durationMs, duplicate: true };
+        }
+        return { ok: false, code: "ALREADY_ENDED" };
       }
       return { ok: false, code: activeId ? "SESSION_CHANGED" : "NOT_RUNNING" };
     }
