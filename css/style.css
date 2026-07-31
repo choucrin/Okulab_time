@@ -496,7 +496,7 @@ button:focus-visible {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--safe-b) + 20px);
+  bottom: calc(var(--safe-b) + 30px);   /* バージョン表記と縦に重ならない高さ */
   transform: translateX(-50%);
   background: var(--text);
   color: var(--bg);

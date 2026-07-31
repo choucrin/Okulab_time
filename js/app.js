@@ -13,7 +13,7 @@ import {
   subscribeSessions, subscribeCurrent, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.1";
+export const APP_VERSION = "v.01.2";
 
 const STORAGE_KEY = "okulab-time/session";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
