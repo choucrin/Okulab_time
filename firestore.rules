@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────
+//  Okulab Time — Firestore セキュリティルール
+//
+//  方針:
+//   ・ログイン(匿名認証)していない端末は一切アクセスできない。
+//   ・rooms/{roomId} の roomId は合言葉の SHA-256。クライアントから
+//     コレクションを列挙する手段はないため、合言葉を知らない限り
+//     どのルームにも到達できない。
+//   ・保存されるデータの形を検証し、開始時刻の改ざんや
+//     進行中レコードの削除を防ぐ。
+// ─────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // 時計同期用のプローブ。自分の分だけ読み書きできる。
+    match /rooms/{roomId}/clock/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // 進行中セッションの排他制御フラグ。
+    match /rooms/{roomId}/meta/{docId} {
+      allow read, write: if signedIn();
+    }
+
+    // 計測記録。
+    match /rooms/{roomId}/sessions/{sessionId} {
+
+      function incoming() {
+        return request.resource.data;
+      }
+
+      function validCreate() {
+        return incoming().status == 'running'
+            && incoming().startMs is number
+            && incoming().label is string
+            && incoming().label.size() <= 80
+            && incoming().startedBy == request.auth.uid
+            && incoming().endMs == null;
+      }
+
+      function validUpdate() {
+        return resource.data.status == 'running'
+            && incoming().status in ['done', 'aborted']
+            && incoming().startMs == resource.data.startMs
+            && incoming().startedBy == resource.data.startedBy;
+      }
+
+      allow read:   if signedIn();
+      allow create: if signedIn() && validCreate();
+      allow update: if signedIn() && validUpdate();
+      allow delete: if signedIn() && resource.data.status != 'running';
+    }
+  }
+}

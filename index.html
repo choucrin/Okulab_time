@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Okulab Time">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b1220">
+<meta name="format-detection" content="telephone=no">
+<title>Okulab Time — 2端末計測</title>
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon.svg">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+
+<!-- ───────── 設定不備 ───────── -->
+<section id="screen-config" class="screen" hidden>
+  <div class="card card--warn">
+    <h1>Firebase の設定が必要です</h1>
+    <p><code>js/firebase-config.js</code> を開き、Firebase コンソールで発行した設定値に書き換えてください。</p>
+    <p class="muted">手順は README.md の「セットアップ」を参照してください。</p>
+    <p id="config-detail" class="muted mono"></p>
+  </div>
+</section>
+
+<!-- ───────── 参加画面 ───────── -->
+<section id="screen-join" class="screen" hidden>
+  <div class="card">
+    <h1 class="brand">Okulab&nbsp;Time</h1>
+    <p class="lede">2端末で計測開始・終了を送信し、経過時間を記録します。</p>
+
+    <form id="join-form" novalidate>
+      <label class="field">
+        <span class="field__label">合言葉(ルームキー)</span>
+        <input type="password" id="input-room" name="room" required
+               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               placeholder="両方の端末で同じ文字列を入力">
+        <span class="field__hint">同じ合言葉を入力した端末どうしがペアになります。</span>
+      </label>
+
+      <fieldset class="roles">
+        <legend class="field__label">この端末の役割</legend>
+        <label class="role">
+          <input type="radio" name="role" value="start" required>
+          <span class="role__body">
+            <strong class="role__title">計測開始</strong>
+            <span class="role__desc">開始ボタンを表示します</span>
+          </span>
+        </label>
+        <label class="role">
+          <input type="radio" name="role" value="end">
+          <span class="role__body">
+            <strong class="role__title">計測終了</strong>
+            <span class="role__desc">終了ボタンを表示します</span>
+          </span>
+        </label>
+        <label class="role">
+          <input type="radio" name="role" value="view">
+          <span class="role__body">
+            <strong class="role__title">閲覧のみ</strong>
+            <span class="role__desc">記録の確認と書き出し</span>
+          </span>
+        </label>
+      </fieldset>
+
+      <button type="submit" class="btn btn--primary" id="btn-join">この端末を参加させる</button>
+      <p id="join-error" class="error" role="alert" hidden></p>
+    </form>
+  </div>
+</section>
+
+<!-- ───────── メイン画面 ───────── -->
+<section id="screen-main" class="screen screen--main" hidden>
+  <header class="topbar">
+    <div class="topbar__left">
+      <span class="pill" id="pill-role">—</span>
+      <span class="pill pill--muted" id="pill-room">room —</span>
+    </div>
+    <div class="topbar__right">
+      <span class="pill pill--muted" id="pill-clock" title="サーバー時刻との同期精度">同期中…</span>
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-leave">退出</button>
+    </div>
+  </header>
+
+  <main class="stack">
+
+    <!-- 状態カード -->
+    <div class="status" id="status-card" data-state="idle">
+      <div class="status__label" id="status-label">待機中</div>
+      <div class="status__time" id="status-time">--:--.---</div>
+      <div class="status__meta" id="status-meta">計測は開始されていません</div>
+    </div>
+
+    <!-- 開始パネル -->
+    <div class="panel" id="panel-start" hidden>
+      <label class="field">
+        <span class="field__label">ラベル(任意)</span>
+        <input type="text" id="input-label" maxlength="80"
+               autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="被験者名・条件名など">
+      </label>
+      <button type="button" class="bigbtn bigbtn--start" id="btn-start">
+        <span class="bigbtn__title">計測開始</span>
+        <span class="bigbtn__sub">タップした瞬間を記録します</span>
+      </button>
+    </div>
+
+    <!-- 終了パネル -->
+    <div class="panel" id="panel-end" hidden>
+      <button type="button" class="bigbtn bigbtn--end" id="btn-end" disabled>
+        <span class="bigbtn__title">計測終了</span>
+        <span class="bigbtn__sub">タップした瞬間を記録します</span>
+      </button>
+    </div>
+
+    <p id="action-error" class="error" role="alert" hidden></p>
+
+    <!-- 履歴 -->
+    <section class="records">
+      <div class="records__head">
+        <h2 class="records__title">記録 <span class="count" id="record-count">0</span></h2>
+        <div class="records__tools">
+          <button type="button" class="btn btn--ghost btn--sm" id="btn-abort" hidden>計測を中止</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="btn-csv">CSV 書き出し</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">ラベル</th>
+              <th scope="col">開始</th>
+              <th scope="col">終了</th>
+              <th scope="col" class="num">経過(秒)</th>
+              <th scope="col"><span class="sr-only">操作</span></th>
+            </tr>
+          </thead>
+          <tbody id="record-body"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="record-empty">まだ記録がありません。</p>
+      <p class="muted small">
+        時刻は各端末のブラウザで取得し、サーバー時刻との推定差分で補正しています。
+        補正の精度はヘッダーの同期表示で確認できます。
+      </p>
+    </section>
+
+  </main>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
