@@ -558,7 +558,11 @@ button:focus-visible {
 .reading {
   flex: 1 1 auto;
   min-height: 0;          /* flex 子要素がはみ出さないために必要 */
-  overflow: hidden;
+  /* 収まらない場合はこの枠の中だけでスクロールさせる。
+     ページ全体は動かさない(画面外へ流れると被験者が見失うため) */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);

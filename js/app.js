@@ -15,7 +15,7 @@ import {
   deleteAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.7";
+export const APP_VERSION = "v.01.8";
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
@@ -29,6 +29,7 @@ const GOOD_ACCURACY_MS = 250;   // 時刻補正がこれより粗い記録には
 const RECONCILE_EVERY_MS = 45000;  // 進行中フラグをサーバーと突き合わせる間隔
 const RECONCILE_TIMEOUT_MS = 8000; // 突き合わせの打ち切り
 const RESUBSCRIBE_GAP_MS = 10000;  // 購読を作り直す最小間隔
+const MIN_PASSAGE_PX = 13.5;       // 読み物の文字サイズの下限(これ以下にはしない)
 
 // 一時的な障害。押した時刻を保持したまま送り直す価値があるもの。
 const RETRYABLE = new Set(["unavailable", "deadline-exceeded", "internal", "aborted", "cancelled"]);
@@ -339,9 +340,9 @@ function nextPassage() {
 }
 
 /**
- * 文章が枠に収まるまで文字を小さくする。
- * 端末の大きさも文章の長さもまちまちなので、スクロールを出さないための保険。
- * 読みづらくならないよう下限は決めておく。
+ * 文章が枠に収まるよう文字を少しだけ小さくする。
+ * 読みづらくなっては本末転倒なので下限を決めておき、
+ * それでも収まらない分は枠の中でスクロールしてもらう。
  */
 function fitPassage() {
   const box = el.passageText.parentElement;
@@ -349,12 +350,12 @@ function fitPassage() {
   let size = parseFloat(getComputedStyle(el.passageText).fontSize);
   if (!Number.isFinite(size)) return;
 
-  for (let i = 0; i < 24 && size > 11; i++) {
+  for (let i = 0; i < 12 && size > MIN_PASSAGE_PX; i++) {
     if (box.scrollHeight <= box.clientHeight) break;
     size -= 0.5;
     el.passageText.style.fontSize = size + "px";
   }
-  el.screenParticipant.scrollTop = 0;
+  box.scrollTop = 0;        // 次の文章は必ず先頭から読ませる
 }
 
 /**
