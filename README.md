@@ -136,13 +136,25 @@ const firebaseConfig = {
 
 1. GitHub でリポジトリ <https://github.com/choucrin/Okulab_time> を開く
 2. **Settings** タブ → 左メニュー **Pages**
-3. **Build and deployment** の **Source** を **Deploy from a branch** にする
-4. **Branch** を **`main`** / フォルダを **`/ (root)`** にして **Save**
+3. **Build and deployment** の **Source** を **GitHub Actions** にする
+4. `main` へ push すると、[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) が
+   整合性チェック → デプロイの順に実行されます
 5. 1〜2 分待つと以下の URL で公開されます
 
 ```
 https://choucrin.github.io/Okulab_time/
 ```
+
+> **検証に失敗した場合はデプロイされません。**
+> Actions タブに原因が表示されます。手元で確認するには次を実行してください。
+>
+> ```bash
+> node tools/verify.js
+> ```
+>
+> 検証内容: 全 JS の構文 / HTML の `id` と JS の参照 / 使用クラスと CSS 定義 /
+> **Firestore ルールと送信フィールドの照合** / エラーコードと文言テーブル /
+> バージョン表記の一致 / Firebase 設定の記入。
 
 この URL を iPad と iPhone の Safari で開きます。
 **ホーム画面に追加**(共有ボタン → ホーム画面に追加)しておくと、

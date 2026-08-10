@@ -1,0 +1,60 @@
+name: 検証とデプロイ
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# GitHub Pages へのデプロイに必要な権限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時実行を 1 本に制限する(進行中のデプロイは打ち切らない)
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: 整合性チェック
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Node.js を準備
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 検証を実行
+        run: node tools/verify.js
+
+  deploy:
+    name: GitHub Pages へデプロイ
+    needs: verify
+    # 検証を通った main への push のみデプロイする(PR ではデプロイしない)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Pages の設定を読み込む
+        uses: actions/configure-pages@v5
+
+      - name: 公開する成果物をまとめる
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: デプロイ
+        id: deployment
+        uses: actions/deploy-pages@v4
