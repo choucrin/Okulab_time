@@ -14,7 +14,7 @@ import {
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.5";
+export const APP_VERSION = "v.01.6";
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
@@ -112,6 +112,8 @@ let reconcileEpoch = null;      // 実行中の突き合わせの世代(null な
 let reconcileFailures = 0;
 let suspectTimer = null;        // 購読どうしの食い違いを疑ってからの猶予
 let lastResubscribe = 0;
+let participantFailures = 0;    // 被験者用画面で記録できなかった操作の数
+const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
 const connErrors = new Map();        // 購読ごとの接続エラー
 
 // ── 起動 ────────────────────────────────────────────────────
@@ -172,7 +174,11 @@ async function restore() {
     return;
   }
 
-  show("loading");
+  // 被験者用画面のまま再読み込みされた場合、接続中の案内も見せない
+  const wasParticipant = saved.participant === true && saved.role === "end";
+  if (wasParticipant) show("participant");
+  else show("loading");
+
   const slow = setTimeout(() => {
     el.loadingDetail.textContent = "接続に時間がかかっています。通信状況を確認してください。";
   }, 4000);
@@ -180,7 +186,7 @@ async function restore() {
   clearTimeout(slow);
   el.loadingDetail.textContent = "Firebase に接続中";
   if (!authorized) return;
-  enterRoom(saved.roomId, saved.role);
+  enterRoom(saved.roomId, saved.role, wasParticipant);
 }
 
 /** 匿名認証の完了を待つ。失敗したら参加画面にエラーを出して false を返す。 */
@@ -226,30 +232,79 @@ function bindEvents() {
 
 function setParticipant(on) {
   state.participant = on && state.role === "end";
-  if (state.participant && !el.passageText.textContent) nextPassage();
+  saveSession();
+
+  if (state.participant) {
+    // 表示中の通知が被験者に見えないよう、切り替える前に消す
+    clearTimeout(toastTimer);
+    el.toast.hidden = true;
+    el.toast.textContent = "";
+  }
+
   showRoomScreen();
+
+  // 文字サイズの調整は、画面が表示されてからでないと寸法を測れない
+  if (state.participant) {
+    if (el.passageText.textContent) fitPassage();
+    else nextPassage();
+  }
+}
+
+function saveSession() {
+  if (!state.roomId || !state.role) return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      roomId: state.roomId, role: state.role, participant: state.participant,
+    }));
+  } catch { /* プライベートブラウズなどでは保存できない */ }
 }
 
 function showRoomScreen() {
   show(state.participant ? "participant" : "main");
 }
 
-/** そのルームで既に出した文章の番号 */
+/**
+ * 被験者用画面での失敗を実験者に伝える。
+ * 被験者の画面には何も出せないため、実験者用画面に残る形で数だけ知らせる。
+ */
+function noteParticipantFailure(code) {
+  participantFailures += 1;
+  console.warn(`[okulab-time] 被験者用画面での操作を記録できませんでした(${code})`);
+  setConnError(
+    "participant",
+    `被験者用画面での操作を ${participantFailures} 件記録できませんでした。` +
+    "計測が開始されていなかった可能性があります。記録一覧を確認してください。"
+  );
+}
+
+/**
+ * そのルームで既に出した文章の番号。
+ * localStorage が使えない環境(プライベートブラウズなど)でも
+ * 重複防止が失われないよう、メモリ上の記録を正とする。
+ */
 function readShown(roomId) {
+  if (shownPassages.has(roomId)) return shownPassages.get(roomId);
+
+  let list = [];
   try {
     const all = JSON.parse(localStorage.getItem(READ_KEY) ?? "{}");
-    return Array.isArray(all[roomId]) ? all[roomId] : [];
-  } catch {
-    return [];
-  }
+    if (all && typeof all === "object" && !Array.isArray(all) && Array.isArray(all[roomId])) {
+      list = all[roomId].filter((n) => Number.isInteger(n));
+    }
+  } catch { /* 読めなければ空から始める */ }
+
+  shownPassages.set(roomId, list);
+  return list;
 }
 
 function writeShown(roomId, list) {
+  shownPassages.set(roomId, list);
   try {
-    const all = JSON.parse(localStorage.getItem(READ_KEY) ?? "{}");
+    const raw = JSON.parse(localStorage.getItem(READ_KEY) ?? "{}");
+    const all = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     all[roomId] = list;
     localStorage.setItem(READ_KEY, JSON.stringify(all));
-  } catch { /* 保存できなくても表示自体は続けられる */ }
+  } catch { /* 保存できなくてもメモリ上の記録で重複は防げる */ }
 }
 
 /**
@@ -263,9 +318,13 @@ function nextPassage() {
   let shown = readShown(roomId);
   let remaining = PASSAGES.map((_, i) => i).filter((i) => !shown.includes(i));
 
-  if (remaining.length === 0) {          // 出しきったので重複を許可する
-    shown = [];
-    remaining = PASSAGES.map((_, i) => i);
+  if (remaining.length === 0) {
+    // 出しきったので選び直す。ただし、いま出ている文章は続けて出さない。
+    // 押しても画面が変わらないと、それ自体が手がかりになってしまうため。
+    const current = shown.at(-1);
+    shown = Number.isInteger(current) ? [current] : [];
+    remaining = PASSAGES.map((_, i) => i).filter((i) => i !== current);
+    if (remaining.length === 0) remaining = PASSAGES.map((_, i) => i);
   }
 
   const index = remaining[Math.floor(Math.random() * remaining.length)];
@@ -295,14 +354,19 @@ function fitPassage() {
   el.screenParticipant.scrollTop = 0;
 }
 
-/** 被験者用画面の「気づきを検出」 */
+/**
+ * 被験者用画面の「気づきを検出」
+ *
+ * 押したときの反応を、計測中かどうかで変えてはならない。
+ * 変化の有無そのものが「いま計測が動いている」という手がかりになるため、
+ * 成否にかかわらず、押した時点で必ず文章を切り替える。
+ *
+ * 送信も条件を付けずに行う。画面の状態がサーバーとずれている場合に
+ * 押下を握りつぶすと、記録すべき「押した瞬間」を失うため。
+ * 進行中の計測が無ければサーバー側が弾き、その結果は被験者には見えない。
+ */
 async function onDetect(press) {
-  // 進行中の計測が無ければ、何も起きなかったように黙って無視する。
-  // 表示がずれている可能性に備え、状態の確認だけは促しておく。
-  if (!state.activeId) {
-    reconcile("被験者操作");
-    return;
-  }
+  nextPassage();
   await onEnd(press);
 }
 
@@ -385,7 +449,7 @@ async function onJoin(event) {
   }
 }
 
-function enterRoom(roomId, role) {
+function enterRoom(roomId, role, participant = false) {
   teardownRoom();   // 二重購読を防ぐ
 
   state.roomId = roomId;
@@ -397,20 +461,20 @@ function enterRoom(roomId, role) {
   state.abortHint = false;
   state.showMissing = false;
 
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId, role }));
-  } catch { /* プライベートブラウズなどでは保存できない */ }
+  state.participant = participant && role === "end";
+  saveSession();
 
   el.pillRole.textContent = ROLE_LABEL[role];
   el.pillRoom.textContent = "room " + roomId.slice(0, 6);
   el.panelStart.hidden = role !== "start";
   el.panelEnd.hidden = role !== "end";
   el.btnParticipant.hidden = role !== "end";   // 被験者用画面は終了側の端末だけ
-  state.participant = false;
   el.passageText.textContent = "";
+  participantFailures = 0;
   hideError(el.actionError);
   render();
   showRoomScreen();
+  if (state.participant) nextPassage();   // 画面を出してから寸法を測る
 
   clock = new ClockSync(db, ["rooms", roomId, "clock", state.uid]);
   clock.onChange = () => { renderClock(); renderControls(); };
@@ -997,8 +1061,10 @@ async function onEnd(press) {
     if (epoch !== roomEpoch) return;
     if (result.ok) {
       applyCurrent(null);   // 購読の到着を待たずに待機中へ戻す
-      if (state.participant) nextPassage();
       toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒` + (result.duplicate ? "(再送を確認)" : ""));
+    } else if (state.participant) {
+      // 被験者には見せられないので、実験者用画面に残る形で知らせる
+      noteParticipantFailure(result.code);
     } else {
       handleCode(result.code);
     }

@@ -561,7 +561,9 @@ button:focus-visible {
   border-radius: var(--radius);
   padding: clamp(14px, 3.4vw, 22px);
   display: flex;
-  align-items: center;
+  /* 収まらない場合に下側だけへ溢れさせる。中央寄せだと上端の溢れを
+     scrollHeight で検出できず、自動調整が効かなくなる */
+  align-items: flex-start;
 }
 
 .reading__text {
@@ -574,10 +576,13 @@ button:focus-visible {
   text-align: justify;
 }
 
+/* opacity を要素全体にかけると背景と合成されて可読性が落ちるため、
+   控えめにするのは文字色だけにする */
 .switch-back {
   flex: none;
   align-self: flex-end;
-  opacity: .45;
+  min-height: 44px;
+  color: var(--text-dim);
 }
 
 .switch-ui { width: 100%; margin-top: 12px; }
