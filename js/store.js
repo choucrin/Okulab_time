@@ -15,7 +15,7 @@
 
 import {
   collection, doc, runTransaction, onSnapshot, query, orderBy, limit,
-  serverTimestamp, deleteDoc, getDocs, getDocFromServer,
+  serverTimestamp, deleteDoc, getDocFromServer, getDocsFromServer,
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 /** 画面に一覧表示する件数の上限(CSV 書き出しは全件を取り直す) */
@@ -223,8 +223,12 @@ export async function fetchCurrentFromServer(db, roomId) {
   return snap.exists() ? (snap.data().activeSessionId ?? null) : null;
 }
 
-/** CSV 書き出し用に全件を取得する(古い順) */
+/**
+ * CSV 書き出し用に全件を取得する(古い順)。
+ * 通常の取得はオフライン時に黙ってキャッシュへ落ち、
+ * 購読済みの分だけを「全件」として返してしまうため、必ずサーバーから読む。
+ */
 export async function fetchAllSessions(db, roomId) {
-  const snap = await getDocs(query(sessionsCol(db, roomId), orderBy("startMs", "asc")));
+  const snap = await getDocsFromServer(query(sessionsCol(db, roomId), orderBy("startMs", "asc")));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }

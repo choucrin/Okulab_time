@@ -264,6 +264,10 @@ button:focus-visible {
 .bigbtn--start { background: var(--start); color: var(--start-ink); }
 .bigbtn--end   { background: var(--end);   color: var(--end-ink); }
 
+/* いま想定していない操作。押すことはできる(表示が実状とずれていても
+   操作不能にしないため)が、誤タップを避けられるよう目立たせない */
+.bigbtn--unexpected { opacity: .4; }
+
 /* ===== トップバー ===== */
 
 .topbar {

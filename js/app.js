@@ -4,9 +4,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
-import {
-  getFirestore, disableNetwork, enableNetwork,
-} from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
@@ -15,7 +13,7 @@ import {
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.3";
+export const APP_VERSION = "v.01.4";
 
 const STORAGE_KEY = "okulab-time/session";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
@@ -27,6 +25,7 @@ const MISSING_GRACE_MS = 1500;  // 進行中の実体待ちを不整合と判断
 const GOOD_ACCURACY_MS = 250;   // 時刻補正がこれより粗い記録には注意を出す
 const RECONCILE_EVERY_MS = 45000;  // 進行中フラグをサーバーと突き合わせる間隔
 const RECONCILE_TIMEOUT_MS = 8000; // 突き合わせの打ち切り
+const RESUBSCRIBE_GAP_MS = 10000;  // 購読を作り直す最小間隔
 
 // 一時的な障害。押した時刻を保持したまま送り直す価値があるもの。
 const RETRYABLE = new Set(["unavailable", "deadline-exceeded", "internal", "aborted", "cancelled"]);
@@ -100,8 +99,10 @@ let toastTimer = null;
 let missingTimer = null;
 let roomEpoch = 0;                   // ルームを離れた送信・再接続を無効化するための世代
 let reconcileTimer = null;
-let reconciling = false;
+let reconcileEpoch = null;      // 実行中の突き合わせの世代(null なら実行していない)
 let reconcileFailures = 0;
+let suspectTimer = null;        // 購読どうしの食い違いを疑ってからの猶予
+let lastResubscribe = 0;
 const connErrors = new Map();        // 購読ごとの接続エラー
 
 // ── 起動 ────────────────────────────────────────────────────
@@ -314,20 +315,37 @@ function enterRoom(roomId, role) {
   startWatchdog();
 }
 
-function attachSubscriptions(roomId) {
-  if (stopSessions) { stopSessions(); stopSessions = null; }
-  if (stopCurrent) { stopCurrent(); stopCurrent = null; }
+/**
+ * @param {"all"|"current"|"sessions"} scope 作り直す購読の範囲。
+ *   記録一覧の購読は張り直すたびに最大 300 件を読み直すため、
+ *   疑わしい側だけを作り直して読み取りの無駄を抑える。
+ */
+function attachSubscriptions(roomId, scope = "all") {
+  const sessions = scope === "all" || scope === "sessions";
+  const current = scope === "all" || scope === "current";
 
-  stopSessions = watch(
+  if (sessions && stopSessions) { stopSessions(); stopSessions = null; }
+  if (current && stopCurrent) { stopCurrent(); stopCurrent = null; }
+
+  if (sessions) stopSessions = watch(
     (onData, onError) => subscribeSessions(db, roomId, onData, onError),
     onSessions,
     "sessions"
   );
-  stopCurrent = watch(
+  if (current) stopCurrent = watch(
     (onData, onError) => subscribeCurrent(db, roomId, onData, onError),
-    onCurrent,
+    applyCurrent,
     "current"
   );
+}
+
+/** 購読を作り直す(短時間に繰り返さないよう間隔を空ける) */
+function resubscribe(scope) {
+  if (!state.roomId) return;
+  const now = Date.now();
+  if (now - lastResubscribe < RESUBSCRIBE_GAP_MS) return;
+  lastResubscribe = now;
+  attachSubscriptions(state.roomId, scope);
 }
 
 /**
@@ -370,7 +388,8 @@ function stopWatchdog() {
   if (reconcileTimer) clearInterval(reconcileTimer);
   reconcileTimer = null;
   reconcileFailures = 0;
-  reconciling = false;
+  clearSuspect();
+  // 実行中の突き合わせは世代で無効化されるため、ここでは触らない
 
   document.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("pageshow", onResume);
@@ -380,11 +399,11 @@ function stopWatchdog() {
 
 /** サーバーの進行中フラグと画面の状態を突き合わせ、ずれていれば直す */
 async function reconcile(reason) {
-  if (!db || !state.roomId || reconciling) return;
+  if (!db || !state.roomId || reconcileEpoch !== null) return;
 
-  reconciling = true;
   const epoch = roomEpoch;
   const roomId = state.roomId;
+  reconcileEpoch = epoch;
 
   try {
     const serverId = await withTimeout(fetchCurrentFromServer(db, roomId), RECONCILE_TIMEOUT_MS);
@@ -394,12 +413,12 @@ async function reconcile(reason) {
     setConnError("stale", null);
 
     if (serverId !== state.activeId) {
-      // 購読が取りこぼしていた。状態を直したうえで、購読自体を作り直す。
+      // 購読が取りこぼしていた。状態を直したうえで、その購読だけ作り直す。
       console.warn(
-        `[okulab-time] 購読の取りこぼしを検出(${reason}): サーバー=${serverId} 画面=${state.activeId}`
+        `[okulab-time] 進行中フラグの取りこぼしを検出(${reason}): サーバー=${serverId} 画面=${state.activeId}`
       );
-      onCurrent(serverId);
-      await revive(roomId, epoch);
+      applyCurrent(serverId);
+      resubscribe("current");
     }
   } catch {
     if (epoch !== roomEpoch) return;
@@ -412,21 +431,9 @@ async function reconcile(reason) {
       );
     }
   } finally {
-    reconciling = false;
+    // 別の世代が動き出していれば、その解除は相手に任せる
+    if (reconcileEpoch === epoch) reconcileEpoch = null;
   }
-}
-
-/** 接続を張り直して購読を作り直す(取りこぼしを検出したときだけ実行する) */
-async function revive(roomId, epoch) {
-  // 送信中にネットワークを落とすと、確定寸前の操作を巻き添えにする
-  if (!state.busy) {
-    try {
-      await disableNetwork(db);
-      await enableNetwork(db);
-    } catch { /* 張り直せなくても購読の作り直しは試みる */ }
-  }
-  if (epoch !== roomEpoch) return;
-  attachSubscriptions(roomId);
 }
 
 function withTimeout(promise, ms) {
@@ -539,28 +546,53 @@ function onSessions(list) {
   state.sessions = list;
   state.sessionsLoaded = true;
   render();
-
-  // 記録側とフラグ側で食い違っていれば、フラグ側の購読が遅れている。
-  // 片方の購読だけが生きている状態なので、すぐ突き合わせて直す。
-  if (state.activeId) {
-    // 進行中のはずの記録が既に終了している
-    const session = list.find((s) => s.id === state.activeId);
-    if (session && session.status !== "running") reconcile("記録側との食い違い");
-  } else if (list.some((s) => s.status === "running")) {
-    // 待機中のはずなのに進行中の記録がある
-    reconcile("記録側との食い違い");
-  }
+  checkAgreement();
 }
 
-function onCurrent(activeId) {
+/**
+ * 進行中フラグを反映する。
+ * 購読からの通知のほか、トランザクションの結果からも直接呼ぶ。
+ * トランザクションの書き込みはローカルに先行反映されないため、
+ * 操作した本人の画面も、これを呼ばないと購読の到着まで変わらない。
+ */
+function applyCurrent(activeId) {
   if (activeId !== state.activeId) {
     state.abortHint = false;
     state.showMissing = false;
     clearMissingTimer();
+    clearSuspect();
   }
   state.activeId = activeId;
   state.currentLoaded = true;
   render();
+  checkAgreement();
+}
+
+/**
+ * 記録側と進行中フラグ側の食い違いを監視する。
+ *
+ * 2 つの購読は独立していて到着順が保証されないため、
+ * 計測のたびに一瞬食い違うのは正常。すぐ異常と決めつけると、
+ * 正常時にも購読の作り直しが走ってしまう。
+ * 猶予を置いても解消しない場合にだけ、購読を疑って突き合わせる。
+ */
+function checkAgreement() {
+  const disagrees = state.activeId
+    ? state.sessions.some((s) => s.id === state.activeId && s.status !== "running")
+    : state.sessions.some((s) => s.status === "running");
+
+  if (!disagrees) { clearSuspect(); return; }
+  if (suspectTimer) return;
+
+  suspectTimer = setTimeout(() => {
+    suspectTimer = null;
+    reconcile("記録側との食い違い");
+  }, MISSING_GRACE_MS);
+}
+
+function clearSuspect() {
+  if (suspectTimer) clearTimeout(suspectTimer);
+  suspectTimer = null;
 }
 
 /**
@@ -571,9 +603,11 @@ function scheduleMissingCheck() {
   if (missingTimer || state.showMissing) return;
   missingTimer = setTimeout(() => {
     missingTimer = null;
-    if (state.activeId && !activeSession()) {
+    // 進行中を指しているのに記録そのものが猶予を超えて届かない
+    if (state.activeId && !state.sessions.some((s) => s.id === state.activeId)) {
       state.showMissing = true;
       render();
+      resubscribe("sessions");   // 記録側の購読を疑う
     }
   }, MISSING_GRACE_MS);
 }
@@ -618,9 +652,18 @@ function renderStatus() {
 
   el.statusLabel.textContent = "計測中";
   if (!active) {
-    // meta/current は進行中を指しているのに本体が届いていない
     stopTicker();
     el.statusTime.textContent = "--:--.---";
+
+    // 記録は届いているが既に終了している = フラグ側の反映待ち。
+    // 正常な終了直後にも起こるため、異常として扱わない。
+    const settled = state.sessions.find((s) => s.id === state.activeId);
+    if (settled) {
+      el.statusMeta.textContent = "終了を反映しています…";
+      return;
+    }
+
+    // 記録そのものが届いていない
     if (state.showMissing) {
       el.statusMeta.textContent = "進行中の記録を読み込めません。「計測を中止」で状態を戻せます。";
     } else {
@@ -658,8 +701,14 @@ function renderControls() {
   const running = Boolean(state.activeId);
   const synced = Boolean(clock?.ok);
 
-  el.btnStart.disabled = !ready || running || state.busy;
-  el.btnEnd.disabled = !ready || !running || state.busy;
+  // 表示が実際の状態と食い違っていても操作不能にならないよう、
+  // 可否の最終判断はサーバーのトランザクションに委ねる。
+  // 押せないようにすると、その間の「押した瞬間」が失われてしまう。
+  el.btnStart.disabled = !ready || state.busy;
+  el.btnEnd.disabled = !ready || state.busy;
+  // 想定外の操作は見た目で抑制する(押すことはできる)
+  el.btnStart.classList.toggle("bigbtn--unexpected", ready && running);
+  el.btnEnd.classList.toggle("bigbtn--unexpected", ready && !running);
   // 状態がずれているときは、進行中フラグが読めていなくても復旧できるように出す
   el.btnAbort.hidden = (!running && !state.abortHint) || state.role === "view";
   // 送信中の中止は、確定寸前の押下時刻を捨ててしまうので受け付けない
@@ -813,7 +862,10 @@ async function onStart(press) {
 
     if (result.duplicate && result.status && result.status !== "running") {
       toast("この計測は既に終了しています(再送を確認)");
+      reconcile("送信後の確認");
     } else {
+      // トランザクションの結果は権威ある情報。購読の到着を待たずに反映する
+      applyCurrent(sessionId);
       toast(result.duplicate ? "計測を開始しました(再送を確認)" : "計測を開始しました");
     }
   }, epoch);
@@ -835,6 +887,7 @@ async function onEnd(press) {
     );
     if (epoch !== roomEpoch) return;
     if (result.ok) {
+      applyCurrent(null);   // 購読の到着を待たずに待機中へ戻す
       toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒` + (result.duplicate ? "(再送を確認)" : ""));
     } else {
       handleCode(result.code);
@@ -870,8 +923,12 @@ async function onAbort() {
     );
     if (epoch !== roomEpoch) return;
     state.abortHint = false;
-    if (result.ok) toast("計測を中止しました");
-    else showError(el.actionError, describeCode(result.code));
+    if (result.ok) {
+      applyCurrent(null);
+      toast("計測を中止しました");
+    } else {
+      showError(el.actionError, describeCode(result.code));
+    }
   }, epoch);
 }
 
