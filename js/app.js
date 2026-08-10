@@ -4,16 +4,18 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
+import {
+  getFirestore, disableNetwork, enableNetwork,
+} from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
 import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
-  subscribeSessions, subscribeCurrent, fetchAllSessions, SESSION_LIMIT,
+  subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.2";
+export const APP_VERSION = "v.01.3";
 
 const STORAGE_KEY = "okulab-time/session";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
@@ -23,6 +25,8 @@ const SEND_DEADLINE_MS = 20000; // 再送を打ち切るまでの上限
 const MAX_RESUBSCRIBE = 8;      // 購読の張り直し回数の上限
 const MISSING_GRACE_MS = 1500;  // 進行中の実体待ちを不整合と判断するまでの猶予
 const GOOD_ACCURACY_MS = 250;   // 時刻補正がこれより粗い記録には注意を出す
+const RECONCILE_EVERY_MS = 45000;  // 進行中フラグをサーバーと突き合わせる間隔
+const RECONCILE_TIMEOUT_MS = 8000; // 突き合わせの打ち切り
 
 // 一時的な障害。押した時刻を保持したまま送り直す価値があるもの。
 const RETRYABLE = new Set(["unavailable", "deadline-exceeded", "internal", "aborted", "cancelled"]);
@@ -95,6 +99,9 @@ let ticker = null;
 let toastTimer = null;
 let missingTimer = null;
 let roomEpoch = 0;                   // ルームを離れた送信・再接続を無効化するための世代
+let reconcileTimer = null;
+let reconciling = false;
+let reconcileFailures = 0;
 const connErrors = new Map();        // 購読ごとの接続エラー
 
 // ── 起動 ────────────────────────────────────────────────────
@@ -303,6 +310,14 @@ function enterRoom(roomId, role) {
   renderClock();
   clock.start();
 
+  attachSubscriptions(roomId);
+  startWatchdog();
+}
+
+function attachSubscriptions(roomId) {
+  if (stopSessions) { stopSessions(); stopSessions = null; }
+  if (stopCurrent) { stopCurrent(); stopCurrent = null; }
+
   stopSessions = watch(
     (onData, onError) => subscribeSessions(db, roomId, onData, onError),
     onSessions,
@@ -327,6 +342,99 @@ function setConnError(key, message) {
   const messages = [...new Set(connErrors.values())];
   el.connError.textContent = messages.join(" ");
   el.connError.hidden = messages.length === 0;
+}
+
+// ── 購読の生存監視 ──────────────────────────────────────────
+//
+//  onSnapshot は、接続が切れてもエラーを返さないまま更新が止まることがある
+//  (画面ロックやアプリ切替でページが凍結された後に起こる)。
+//  エラー時の再接続だけでは復旧できないため、進行中フラグを定期的に
+//  サーバーへ直接問い合わせ、食い違っていれば購読ごと張り直す。
+
+const onResume = () => reconcile("復帰");
+const onVisible = () => { if (document.visibilityState === "visible") reconcile("復帰"); };
+
+function startWatchdog() {
+  stopWatchdog();
+  reconcileTimer = setInterval(() => {
+    if (document.visibilityState === "visible") reconcile("定期");
+  }, RECONCILE_EVERY_MS);
+
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("pageshow", onResume);
+  window.addEventListener("focus", onResume);
+  window.addEventListener("online", onResume);
+}
+
+function stopWatchdog() {
+  if (reconcileTimer) clearInterval(reconcileTimer);
+  reconcileTimer = null;
+  reconcileFailures = 0;
+  reconciling = false;
+
+  document.removeEventListener("visibilitychange", onVisible);
+  window.removeEventListener("pageshow", onResume);
+  window.removeEventListener("focus", onResume);
+  window.removeEventListener("online", onResume);
+}
+
+/** サーバーの進行中フラグと画面の状態を突き合わせ、ずれていれば直す */
+async function reconcile(reason) {
+  if (!db || !state.roomId || reconciling) return;
+
+  reconciling = true;
+  const epoch = roomEpoch;
+  const roomId = state.roomId;
+
+  try {
+    const serverId = await withTimeout(fetchCurrentFromServer(db, roomId), RECONCILE_TIMEOUT_MS);
+    if (epoch !== roomEpoch) return;
+
+    reconcileFailures = 0;
+    setConnError("stale", null);
+
+    if (serverId !== state.activeId) {
+      // 購読が取りこぼしていた。状態を直したうえで、購読自体を作り直す。
+      console.warn(
+        `[okulab-time] 購読の取りこぼしを検出(${reason}): サーバー=${serverId} 画面=${state.activeId}`
+      );
+      onCurrent(serverId);
+      await revive(roomId, epoch);
+    }
+  } catch {
+    if (epoch !== roomEpoch) return;
+    reconcileFailures += 1;
+    // 一時的な失敗で警告を出すと煩いので、続けて失敗したときだけ知らせる
+    if (reconcileFailures >= 2) {
+      setConnError(
+        "stale",
+        "サーバーと同期できていません。画面の表示が実際の状態と異なっている可能性があります。通信状況を確認してください。"
+      );
+    }
+  } finally {
+    reconciling = false;
+  }
+}
+
+/** 接続を張り直して購読を作り直す(取りこぼしを検出したときだけ実行する) */
+async function revive(roomId, epoch) {
+  // 送信中にネットワークを落とすと、確定寸前の操作を巻き添えにする
+  if (!state.busy) {
+    try {
+      await disableNetwork(db);
+      await enableNetwork(db);
+    } catch { /* 張り直せなくても購読の作り直しは試みる */ }
+  }
+  if (epoch !== roomEpoch) return;
+  attachSubscriptions(roomId);
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), ms); }),
+  ]);
 }
 
 /**
@@ -392,6 +500,7 @@ function onLeave() {
 /** ルームに紐づく購読・タイマー・送信中の操作をすべて無効化する */
 function teardownRoom() {
   roomEpoch += 1;   // 実行中の再送があっても、その結果を反映させない
+  stopWatchdog();
   if (stopSessions) { stopSessions(); stopSessions = null; }
   if (stopCurrent) { stopCurrent(); stopCurrent = null; }
   if (clock) { clock.stop(); clock = null; }
@@ -430,6 +539,17 @@ function onSessions(list) {
   state.sessions = list;
   state.sessionsLoaded = true;
   render();
+
+  // 記録側とフラグ側で食い違っていれば、フラグ側の購読が遅れている。
+  // 片方の購読だけが生きている状態なので、すぐ突き合わせて直す。
+  if (state.activeId) {
+    // 進行中のはずの記録が既に終了している
+    const session = list.find((s) => s.id === state.activeId);
+    if (session && session.status !== "running") reconcile("記録側との食い違い");
+  } else if (list.some((s) => s.status === "running")) {
+    // 待機中のはずなのに進行中の記録がある
+    reconcile("記録側との食い違い");
+  }
 }
 
 function onCurrent(activeId) {
@@ -463,10 +583,15 @@ function clearMissingTimer() {
   missingTimer = null;
 }
 
-/** 進行中セッションの本体(一覧の件数上限から漏れている場合は null) */
+/**
+ * 進行中セッションの本体。
+ * 一覧の件数上限から漏れている場合や、実体が既に終了している場合は null。
+ * 終了済みの記録で経過時間を数え続けないようにするための判定でもある。
+ */
 function activeSession() {
   if (!state.activeId) return null;
-  return state.sessions.find((s) => s.id === state.activeId) ?? null;
+  const session = state.sessions.find((s) => s.id === state.activeId) ?? null;
+  return session && session.status === "running" ? session : null;
 }
 
 function render() {

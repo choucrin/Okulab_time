@@ -15,7 +15,7 @@
 
 import {
   collection, doc, runTransaction, onSnapshot, query, orderBy, limit,
-  serverTimestamp, deleteDoc, getDocs,
+  serverTimestamp, deleteDoc, getDocs, getDocFromServer,
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 /** 画面に一覧表示する件数の上限(CSV 書き出しは全件を取り直す) */
@@ -211,6 +211,16 @@ export function subscribeCurrent(db, roomId, onData, onError) {
     (snap) => onData(snap.exists() ? (snap.data().activeSessionId ?? null) : null),
     onError
   );
+}
+
+/**
+ * 進行中フラグをサーバーから直接読む。
+ * 購読が無言で止まっていても現状を確かめられるようにするための経路で、
+ * キャッシュではなく必ずサーバーに問い合わせる。
+ */
+export async function fetchCurrentFromServer(db, roomId) {
+  const snap = await getDocFromServer(currentRef(db, roomId));
+  return snap.exists() ? (snap.data().activeSessionId ?? null) : null;
 }
 
 /** CSV 書き出し用に全件を取得する(古い順) */
