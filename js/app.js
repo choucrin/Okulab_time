@@ -12,10 +12,10 @@ import { PASSAGES } from "./passages.js";
 import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
-  deleteAllSessions, SESSION_LIMIT,
+  collectDeletable, deleteSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.8";
+export const APP_VERSION = "v.01.9";
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
@@ -30,6 +30,8 @@ const RECONCILE_EVERY_MS = 45000;  // 進行中フラグをサーバーと突き
 const RECONCILE_TIMEOUT_MS = 8000; // 突き合わせの打ち切り
 const RESUBSCRIBE_GAP_MS = 10000;  // 購読を作り直す最小間隔
 const MIN_PASSAGE_PX = 13.5;       // 読み物の文字サイズの下限(これ以下にはしない)
+const CSV_LABEL = "CSV 書き出し";
+const CLEAR_LABEL = "一括削除";
 
 // 一時的な障害。押した時刻を保持したまま送り直す価値があるもの。
 const RETRYABLE = new Set(["unavailable", "deadline-exceeded", "internal", "aborted", "cancelled"]);
@@ -116,6 +118,7 @@ let reconcileFailures = 0;
 let suspectTimer = null;        // 購読どうしの食い違いを疑ってからの猶予
 let lastResubscribe = 0;
 let participantFailures = 0;    // 被験者用画面で記録できなかった操作の数
+let recordsBusy = false;        // 記録の書き出し・一括削除が動いている
 const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
 const connErrors = new Map();        // 購読ごとの接続エラー
 
@@ -220,8 +223,14 @@ function bindEvents() {
 
   el.btnParticipant.addEventListener("click", () => setParticipant(true));
   el.btnExperimenter.addEventListener("click", () => setParticipant(false));
-  // 画面の回転や表示領域の変化で収まらなくなることがある
-  window.addEventListener("resize", () => { if (state.participant) fitPassage(); });
+  // 画面の回転や表示領域の変化で収まらなくなることがある。
+  // iOS ではアドレスバーの伸縮でも発生するため、まとめて処理する。
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (!state.participant) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fitPassage, 150);
+  });
 
   bindPressButton(el.btnStart, onStart);
   bindPressButton(el.btnEnd, onEnd);
@@ -337,6 +346,7 @@ function nextPassage() {
 
   el.passageText.textContent = PASSAGES[index];
   fitPassage();
+  el.passageText.parentElement.scrollTop = 0;   // 新しい文章は先頭から
 }
 
 /**
@@ -350,12 +360,11 @@ function fitPassage() {
   let size = parseFloat(getComputedStyle(el.passageText).fontSize);
   if (!Number.isFinite(size)) return;
 
-  for (let i = 0; i < 12 && size > MIN_PASSAGE_PX; i++) {
+  for (let i = 0; i < 12 && size - 0.5 >= MIN_PASSAGE_PX; i++) {
     if (box.scrollHeight <= box.clientHeight) break;
     size -= 0.5;
     el.passageText.style.fontSize = size + "px";
   }
-  box.scrollTop = 0;        // 次の文章は必ず先頭から読ませる
 }
 
 /**
@@ -474,6 +483,7 @@ function enterRoom(roomId, role, participant = false) {
   el.panelEnd.hidden = role !== "end";
   el.btnParticipant.hidden = role !== "end";   // 被験者用画面は終了側の端末だけ
   el.btnClear.hidden = role === "view";        // 削除は 1 件ずつの操作と同じ扱い
+  setRecordsBusy(false);                       // 前のルームでの進行状態を持ち越さない
   el.passageText.textContent = "";
   participantFailures = 0;
   hideError(el.actionError);
@@ -671,8 +681,8 @@ function watch(subscribe, onData, key) {
 }
 
 function onLeave() {
-  const message = state.busy
-    ? "送信中の操作があります。中断してこのルームから退出しますか?\n" +
+  const message = (state.busy || recordsBusy)
+    ? "処理中の操作があります。中断してこのルームから退出しますか?\n" +
       "(すでにサーバーに届いていた場合、その操作は記録として残ります)"
     : "このルームから退出します。よろしいですか?";
   if (!confirm(message)) return;
@@ -1181,53 +1191,80 @@ async function withBusy(fn, epoch = roomEpoch) {
   }
 }
 
-// ── 記録の一括削除 ──────────────────────────────────────────
+// ── 記録の書き出しと一括削除 ────────────────────────────────
+//
+//  どちらも全件をサーバーから読むため、同時に走らせてはならない。
+//  削除中に書き出すと、消えた分が抜けた CSV が「成功」として出てしまう。
+
+function setRecordsBusy(on) {
+  recordsBusy = on;
+  el.btnCsv.disabled = on;
+  el.btnClear.disabled = on;
+  if (!on) {
+    el.btnCsv.textContent = CSV_LABEL;
+    el.btnClear.textContent = CLEAR_LABEL;
+  }
+}
 
 /**
  * そのルームの記録をすべて消す。**元に戻せない。**
- * 研究データを失う操作なので、確認を二段階にしている。
+ * 研究データを失う操作なので、実際の件数を示したうえで確認を二段階にしている。
  */
 async function onClearAll() {
-  if (state.busy || !state.roomId) return;
-
-  const shown = state.sessions.length;
-  const count = shown >= SESSION_LIMIT ? `${SESSION_LIMIT} 件以上` : `${shown} 件`;
-  if (shown === 0) return toast("削除する記録がありません");
-
-  const ok = confirm(
-    `このルームの記録(${count})をすべて削除します。\n` +
-    "削除した記録は元に戻せません。\n\n" +
-    "必要な記録は、先に CSV 書き出しで保存してください。\n\n" +
-    "続けますか?"
-  );
-  if (!ok) return;
-
-  if (prompt("確認のため「削除」と入力してください。") !== "削除") {
-    return toast("削除を取り消しました");
-  }
+  if (recordsBusy || state.busy || !state.roomId) return;
 
   const room = state.roomId;
   const epoch = roomEpoch;
-  const label = el.btnClear.textContent;
-  el.btnClear.disabled = true;
-  el.btnCsv.disabled = true;
+
+  setRecordsBusy(true);
+  el.btnClear.textContent = "確認中…";
+  state.busy = true;                 // 削除中は計測操作と退出の警告に反映させる
+  renderControls();
 
   try {
-    const result = await deleteAllSessions(db, room, (done, total) => {
+    // 一覧の購読は上限があり、止まっていることもある。
+    // 同意を得る件数は、必ずサーバーの実数にする。
+    const { refs, skipped } = await collectDeletable(db, room);
+    if (epoch !== roomEpoch) return;
+
+    if (refs.length === 0) {
+      toast(skipped > 0 ? "進行中の計測しかありません" : "削除する記録がありません");
+      return;
+    }
+
+    if (!confirm(
+      `このルームの記録 ${refs.length} 件をすべて削除します。\n` +
+      "削除した記録は元に戻せません。\n\n" +
+      "必要な記録は、先に CSV 書き出しで保存してください。\n\n" +
+      "続けますか?"
+    )) return;
+
+    const typed = prompt("確認のため「削除」と入力してください。");
+    if (typed === null) {
+      // 入力欄が出ない環境では、この経路でしか止まらない
+      return toast("確認できなかったため削除しませんでした");
+    }
+    if (typed.trim() !== "削除") return toast("削除を取り消しました");
+
+    el.btnClear.textContent = `削除中… 0/${refs.length}`;
+    const deleted = await deleteSessions(db, refs, (done, total) => {
       if (epoch === roomEpoch) el.btnClear.textContent = `削除中… ${done}/${total}`;
     });
     if (epoch !== roomEpoch) return;
 
-    const note = result.skipped > 0 ? "(進行中の 1 件は残しました)" : "";
-    toast(`${result.deleted} 件を削除しました${note}`);
+    const note = skipped > 0 ? `(進行中の ${skipped} 件は残しました)` : "";
+    toast(`${deleted} 件を削除しました${note}`);
   } catch (err) {
-    if (epoch === roomEpoch) showError(el.actionError, describeError(err));
+    if (epoch !== roomEpoch) return;
+    // 途中まで消えている場合があるので、その件数を必ず伝える
+    const done = typeof err?.deleted === "number" && err.deleted > 0
+      ? `${err.deleted} 件を削除したところで中断しました。` : "";
+    showError(el.actionError, done + describeError(err));
   } finally {
-    if (epoch === roomEpoch) {
-      el.btnClear.textContent = label;
-      el.btnClear.disabled = false;
-      el.btnCsv.disabled = false;
-    }
+    // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)
+    setRecordsBusy(false);
+    state.busy = false;
+    renderControls();
   }
 }
 
@@ -1247,8 +1284,8 @@ const CSV_HEADER = [
 ];
 
 async function exportCsv() {
-  if (!state.roomId) return;
-  el.btnCsv.disabled = true;
+  if (recordsBusy || !state.roomId) return;
+  setRecordsBusy(true);
   el.btnCsv.textContent = "取得中…";
   try {
     const rows = await fetchAllSessions(db, state.roomId);
@@ -1278,8 +1315,7 @@ async function exportCsv() {
   } catch (err) {
     showError(el.actionError, describeError(err));
   } finally {
-    el.btnCsv.disabled = false;
-    el.btnCsv.textContent = "CSV 書き出し";
+    setRecordsBusy(false);
   }
 }
 

@@ -195,30 +195,58 @@ export function deleteSession(db, roomId, id) {
 }
 
 /**
- * そのルームの記録をすべて削除する。**元に戻せない。**
+ * 削除できる記録を数え上げる。
  *
- * 進行中の記録は残す(ルール側でも削除は拒否される)。
- * 一覧の購読は上限があるため、対象は必ずサーバーから取り直す。
+ * 進行中の記録は対象から外す(ルール側でも削除は拒否される)。
+ * 一覧の購読には上限があるため、対象は必ずサーバーから取り直す。
+ * 並べ替えを指定すると、その項目を持たない記録が結果から漏れるため指定しない。
+ */
+export async function collectDeletable(db, roomId) {
+  const snap = await getDocsFromServer(sessionsCol(db, roomId));
+  const targets = snap.docs.filter((d) => d.data().status !== "running");
+  return { refs: targets.map((d) => d.ref), skipped: snap.docs.length - targets.length };
+}
+
+/**
+ * 記録をまとめて削除する。**元に戻せない。**
+ *
+ * まとめて送る単位ごとに、全部消えるか 1 件も消えないかのどちらかになる。
+ * 途中で失敗した場合、そこまでに済んだ件数を例外に添えて返す。
  *
  * @param {(done:number, total:number) => void} [onProgress]
- * @returns {Promise<{deleted:number, skipped:number}>}
+ * @returns {Promise<number>} 削除できた件数
  */
-export async function deleteAllSessions(db, roomId, onProgress) {
-  const snap = await getDocsFromServer(query(sessionsCol(db, roomId), orderBy("startMs", "asc")));
-  const targets = snap.docs.filter((d) => d.data().status !== "running");
-  const skipped = snap.docs.length - targets.length;
-
+export async function deleteSessions(db, refs, onProgress) {
   let deleted = 0;
-  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-    const chunk = targets.slice(i, i + BATCH_SIZE);
+
+  for (let i = 0; i < refs.length; i += BATCH_SIZE) {
+    const chunk = refs.slice(i, i + BATCH_SIZE);
     const batch = writeBatch(db);
-    for (const doc of chunk) batch.delete(doc.ref);
-    await batch.commit();          // 途中で失敗しても、済んだ分はそのまま消えている
+    for (const ref of chunk) batch.delete(ref);
+
+    try {
+      // 通信が切れると解決も棄却もしないことがあるため打ち切る
+      await withTimeout(batch.commit(), COMMIT_TIMEOUT_MS);
+    } catch (err) {
+      err.deleted = deleted;       // ここまでは確実に消えている
+      throw err;
+    }
+
     deleted += chunk.length;
-    onProgress?.(deleted, targets.length);
+    onProgress?.(deleted, refs.length);
   }
 
-  return { deleted, skipped };
+  return deleted;
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("削除の確定に時間がかかりすぎました")), ms);
+    }),
+  ]);
 }
 
 /** 記録一覧を購読する(開始時刻の新しい順・最新 SESSION_LIMIT 件) */
