@@ -11,10 +11,11 @@ import { ClockSync } from "./clock.js";
 import { PASSAGES } from "./passages.js";
 import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
-  subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions, SESSION_LIMIT,
+  subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
+  deleteAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.6";
+export const APP_VERSION = "v.01.7";
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
@@ -73,6 +74,7 @@ const el = {
   recordNote:    $("record-note"),
   btnAbort:      $("btn-abort"),
   btnCsv:        $("btn-csv"),
+  btnClear:      $("btn-clear"),
   btnParticipant: $("btn-participant"),
   screenParticipant: $("screen-participant"),
   btnDetect:     $("btn-detect"),
@@ -211,6 +213,7 @@ function bindEvents() {
   el.btnReveal.addEventListener("click", toggleReveal);
   el.btnLeave.addEventListener("click", onLeave);
   el.btnCsv.addEventListener("click", exportCsv);
+  el.btnClear.addEventListener("click", onClearAll);
   el.btnAbort.addEventListener("click", onAbort);
   el.recordBody.addEventListener("click", onRecordClick);
 
@@ -469,6 +472,7 @@ function enterRoom(roomId, role, participant = false) {
   el.panelStart.hidden = role !== "start";
   el.panelEnd.hidden = role !== "end";
   el.btnParticipant.hidden = role !== "end";   // 被験者用画面は終了側の端末だけ
+  el.btnClear.hidden = role === "view";        // 削除は 1 件ずつの操作と同じ扱い
   el.passageText.textContent = "";
   participantFailures = 0;
   hideError(el.actionError);
@@ -1172,6 +1176,56 @@ async function withBusy(fn, epoch = roomEpoch) {
       state.busy = false;
       state.sending = false;
       renderControls();
+    }
+  }
+}
+
+// ── 記録の一括削除 ──────────────────────────────────────────
+
+/**
+ * そのルームの記録をすべて消す。**元に戻せない。**
+ * 研究データを失う操作なので、確認を二段階にしている。
+ */
+async function onClearAll() {
+  if (state.busy || !state.roomId) return;
+
+  const shown = state.sessions.length;
+  const count = shown >= SESSION_LIMIT ? `${SESSION_LIMIT} 件以上` : `${shown} 件`;
+  if (shown === 0) return toast("削除する記録がありません");
+
+  const ok = confirm(
+    `このルームの記録(${count})をすべて削除します。\n` +
+    "削除した記録は元に戻せません。\n\n" +
+    "必要な記録は、先に CSV 書き出しで保存してください。\n\n" +
+    "続けますか?"
+  );
+  if (!ok) return;
+
+  if (prompt("確認のため「削除」と入力してください。") !== "削除") {
+    return toast("削除を取り消しました");
+  }
+
+  const room = state.roomId;
+  const epoch = roomEpoch;
+  const label = el.btnClear.textContent;
+  el.btnClear.disabled = true;
+  el.btnCsv.disabled = true;
+
+  try {
+    const result = await deleteAllSessions(db, room, (done, total) => {
+      if (epoch === roomEpoch) el.btnClear.textContent = `削除中… ${done}/${total}`;
+    });
+    if (epoch !== roomEpoch) return;
+
+    const note = result.skipped > 0 ? "(進行中の 1 件は残しました)" : "";
+    toast(`${result.deleted} 件を削除しました${note}`);
+  } catch (err) {
+    if (epoch === roomEpoch) showError(el.actionError, describeError(err));
+  } finally {
+    if (epoch === roomEpoch) {
+      el.btnClear.textContent = label;
+      el.btnClear.disabled = false;
+      el.btnCsv.disabled = false;
     }
   }
 }

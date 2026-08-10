@@ -15,11 +15,14 @@
 
 import {
   collection, doc, runTransaction, onSnapshot, query, orderBy, limit,
-  serverTimestamp, deleteDoc, getDocFromServer, getDocsFromServer,
+  serverTimestamp, deleteDoc, getDocFromServer, getDocsFromServer, writeBatch,
 } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 /** 画面に一覧表示する件数の上限(CSV 書き出しは全件を取り直す) */
 export const SESSION_LIMIT = 300;
+
+/** 一括削除の 1 回あたりの件数(Firestore の上限は 500 操作) */
+const BATCH_SIZE = 400;
 
 /** 合言葉 → ルーム ID(SHA-256) */
 export async function deriveRoomId(passphrase) {
@@ -189,6 +192,33 @@ export function abortSession(db, roomId, { uid, expectedId }) {
 /** 記録を 1 件削除する(進行中のものはルール側でも拒否される) */
 export function deleteSession(db, roomId, id) {
   return deleteDoc(sessionRef(db, roomId, id));
+}
+
+/**
+ * そのルームの記録をすべて削除する。**元に戻せない。**
+ *
+ * 進行中の記録は残す(ルール側でも削除は拒否される)。
+ * 一覧の購読は上限があるため、対象は必ずサーバーから取り直す。
+ *
+ * @param {(done:number, total:number) => void} [onProgress]
+ * @returns {Promise<{deleted:number, skipped:number}>}
+ */
+export async function deleteAllSessions(db, roomId, onProgress) {
+  const snap = await getDocsFromServer(query(sessionsCol(db, roomId), orderBy("startMs", "asc")));
+  const targets = snap.docs.filter((d) => d.data().status !== "running");
+  const skipped = snap.docs.length - targets.length;
+
+  let deleted = 0;
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    const chunk = targets.slice(i, i + BATCH_SIZE);
+    const batch = writeBatch(db);
+    for (const doc of chunk) batch.delete(doc.ref);
+    await batch.commit();          // 途中で失敗しても、済んだ分はそのまま消えている
+    deleted += chunk.length;
+    onProgress?.(deleted, targets.length);
+  }
+
+  return { deleted, skipped };
 }
 
 /** 記録一覧を購読する(開始時刻の新しい順・最新 SESSION_LIMIT 件) */

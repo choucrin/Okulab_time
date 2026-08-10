@@ -239,6 +239,9 @@ button:focus-visible {
 
 .btn--sm { padding: 8px 14px; min-height: 40px; font-size: 0.82rem; font-weight: 500; }
 
+/* 元に戻せない操作。押す前に気づけるよう色で区別する */
+.btn--danger { color: var(--end); border-color: var(--end); }
+
 .bigbtn {
   width: 100%;
   min-height: 168px;
