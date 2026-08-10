@@ -8,14 +8,16 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebas
 
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
+import { PASSAGES } from "./passages.js";
 import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.01.4";
+export const APP_VERSION = "v.01.5";
 
 const STORAGE_KEY = "okulab-time/session";
+const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
 const PRESS_FRESH_MS = 15000;   // pointerdown で拾った時刻を有効とみなす猶予
 const MAX_SEND_ATTEMPTS = 5;
@@ -38,6 +40,7 @@ const el = {
     join:    $("screen-join"),
     loading: $("screen-loading"),
     main:    $("screen-main"),
+    participant: $("screen-participant"),
   },
   configDetail:  $("config-detail"),
   loadingDetail: $("loading-detail"),
@@ -70,6 +73,11 @@ const el = {
   recordNote:    $("record-note"),
   btnAbort:      $("btn-abort"),
   btnCsv:        $("btn-csv"),
+  btnParticipant: $("btn-participant"),
+  screenParticipant: $("screen-participant"),
+  btnDetect:     $("btn-detect"),
+  btnExperimenter: $("btn-experimenter"),
+  passageText:   $("passage-text"),
   version:       $("version"),
   toast:         $("toast"),
 };
@@ -86,6 +94,7 @@ const state = {
   sending: false,
   abortHint: false,    // 状態のずれを検知し、中止での復旧を促している
   showMissing: false,  // 進行中フラグに対応する記録が読み込めていない
+  participant: false,  // 被験者用画面を表示している
 };
 
 let db = null;
@@ -199,8 +208,102 @@ function bindEvents() {
   el.btnAbort.addEventListener("click", onAbort);
   el.recordBody.addEventListener("click", onRecordClick);
 
+  el.btnParticipant.addEventListener("click", () => setParticipant(true));
+  el.btnExperimenter.addEventListener("click", () => setParticipant(false));
+  // 画面の回転や表示領域の変化で収まらなくなることがある
+  window.addEventListener("resize", () => { if (state.participant) fitPassage(); });
+
   bindPressButton(el.btnStart, onStart);
   bindPressButton(el.btnEnd, onEnd);
+  bindPressButton(el.btnDetect, onDetect);
+}
+
+// ── 被験者用画面 ────────────────────────────────────────────
+//
+//  被験者は実験の内容を知らされていないため、この画面では
+//  計測の状態(待機中か計測中か)を一切表に出さない。
+//  ボタンは常に押せて、進行中の計測が無いときは黙って無視する。
+
+function setParticipant(on) {
+  state.participant = on && state.role === "end";
+  if (state.participant && !el.passageText.textContent) nextPassage();
+  showRoomScreen();
+}
+
+function showRoomScreen() {
+  show(state.participant ? "participant" : "main");
+}
+
+/** そのルームで既に出した文章の番号 */
+function readShown(roomId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(READ_KEY) ?? "{}");
+    return Array.isArray(all[roomId]) ? all[roomId] : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeShown(roomId, list) {
+  try {
+    const all = JSON.parse(localStorage.getItem(READ_KEY) ?? "{}");
+    all[roomId] = list;
+    localStorage.setItem(READ_KEY, JSON.stringify(all));
+  } catch { /* 保存できなくても表示自体は続けられる */ }
+}
+
+/**
+ * 次の文章を選ぶ。
+ * 同じルームでは繰り返さない。すべて出しきったら最初から選び直す。
+ */
+function nextPassage() {
+  const roomId = state.roomId;
+  if (!roomId) return;
+
+  let shown = readShown(roomId);
+  let remaining = PASSAGES.map((_, i) => i).filter((i) => !shown.includes(i));
+
+  if (remaining.length === 0) {          // 出しきったので重複を許可する
+    shown = [];
+    remaining = PASSAGES.map((_, i) => i);
+  }
+
+  const index = remaining[Math.floor(Math.random() * remaining.length)];
+  shown.push(index);
+  writeShown(roomId, shown);
+
+  el.passageText.textContent = PASSAGES[index];
+  fitPassage();
+}
+
+/**
+ * 文章が枠に収まるまで文字を小さくする。
+ * 端末の大きさも文章の長さもまちまちなので、スクロールを出さないための保険。
+ * 読みづらくならないよう下限は決めておく。
+ */
+function fitPassage() {
+  const box = el.passageText.parentElement;
+  el.passageText.style.fontSize = "";               // いったん CSS の指定へ戻す
+  let size = parseFloat(getComputedStyle(el.passageText).fontSize);
+  if (!Number.isFinite(size)) return;
+
+  for (let i = 0; i < 24 && size > 11; i++) {
+    if (box.scrollHeight <= box.clientHeight) break;
+    size -= 0.5;
+    el.passageText.style.fontSize = size + "px";
+  }
+  el.screenParticipant.scrollTop = 0;
+}
+
+/** 被験者用画面の「気づきを検出」 */
+async function onDetect(press) {
+  // 進行中の計測が無ければ、何も起きなかったように黙って無視する。
+  // 表示がずれている可能性に備え、状態の確認だけは促しておく。
+  if (!state.activeId) {
+    reconcile("被験者操作");
+    return;
+  }
+  await onEnd(press);
 }
 
 /**
@@ -302,9 +405,12 @@ function enterRoom(roomId, role) {
   el.pillRoom.textContent = "room " + roomId.slice(0, 6);
   el.panelStart.hidden = role !== "start";
   el.panelEnd.hidden = role !== "end";
+  el.btnParticipant.hidden = role !== "end";   // 被験者用画面は終了側の端末だけ
+  state.participant = false;
+  el.passageText.textContent = "";
   hideError(el.actionError);
   render();
-  show("main");
+  showRoomScreen();
 
   clock = new ClockSync(db, ["rooms", roomId, "clock", state.uid]);
   clock.onChange = () => { renderClock(); renderControls(); };
@@ -532,6 +638,8 @@ function leaveRoom() {
   state.sending = false;
   state.abortHint = false;
   state.showMissing = false;
+  state.participant = false;
+  el.passageText.textContent = "";
 
   render();               // 前のルームの記録を画面に残さない
   hideError(el.actionError);
@@ -873,7 +981,8 @@ async function onStart(press) {
 
 async function onEnd(press) {
   if (state.busy || !state.roomId) return;
-  if (!press.synced && !confirmUnsynced()) return;
+  // 被験者に確認ダイアログを見せない(未補正の記録は保存側の印で判別できる)
+  if (!press.synced && !state.participant && !confirmUnsynced()) return;
 
   const room = state.roomId;
   const epoch = roomEpoch;
@@ -888,6 +997,7 @@ async function onEnd(press) {
     if (epoch !== roomEpoch) return;
     if (result.ok) {
       applyCurrent(null);   // 購読の到着を待たずに待機中へ戻す
+      if (state.participant) nextPassage();
       toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒` + (result.duplicate ? "(再送を確認)" : ""));
     } else {
       handleCode(result.code);
@@ -1176,6 +1286,8 @@ function hideError(node) {
 }
 
 function toast(message) {
+  // 被験者用画面では、計測の成否を示す表示を一切出さない
+  if (state.participant) return;
   el.toast.textContent = message;
   el.toast.hidden = false;
   clearTimeout(toastTimer);

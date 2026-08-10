@@ -134,6 +134,9 @@
         <span class="bigbtn__title">計測終了</span>
         <span class="bigbtn__sub" id="end-sub">接続中…</span>
       </button>
+      <button type="button" class="btn btn--ghost switch-ui" id="btn-participant">
+        被験者用の画面に切り替える
+      </button>
     </div>
 
     <p id="action-error" class="error" role="alert" hidden></p>
@@ -174,8 +177,22 @@
   </main>
 </section>
 
+<!-- ───────── 被験者用画面 ───────── -->
+<!-- 実験の内容を知らせないため、状態表示・経過時間・記録を一切置かない -->
+<section id="screen-participant" class="screen-participant" hidden>
+  <button type="button" class="detect" id="btn-detect">気づきを検出</button>
+
+  <div class="reading">
+    <p class="reading__text" id="passage-text"></p>
+  </div>
+
+  <button type="button" class="btn btn--ghost btn--sm switch-back" id="btn-experimenter">
+    実験者用UI
+  </button>
+</section>
+
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.01.4</p>
+<p class="version" id="version">v.01.5</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

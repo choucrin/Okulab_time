@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
 
-const JS_FILES = ["js/app.js", "js/clock.js", "js/store.js", "js/firebase-config.js"];
+const JS_FILES = ["js/app.js", "js/clock.js", "js/store.js", "js/passages.js", "js/firebase-config.js"];
 
 let failed = 0;
 const results = [];
