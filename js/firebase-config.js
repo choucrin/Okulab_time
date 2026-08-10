@@ -9,10 +9,10 @@
 // ─────────────────────────────────────────────────────────────
 
 export const firebaseConfig = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID",
+  apiKey: "AIzaSyDAJfY38qAan4HK6mgs3kOy6bo0BXUOXUY",
+  authDomain: "okulab-time.firebaseapp.com",
+  projectId: "okulab-time",
+  storageBucket: "okulab-time.firebasestorage.app",
+  messagingSenderId: "503694436384",
+  appId: "1:503694436384:web:3ea36039d0379acb117445",
 };
