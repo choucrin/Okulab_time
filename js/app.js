@@ -1215,11 +1215,13 @@ async function send(operation, cancelled = () => false) {
   let delay = 400;
   // state.sending を戻すのは withBusy の役目(世代が変わっていたら触らないため)
   for (let attempt = 1; ; attempt++) {
-    if (cancelled()) return { ok: false, code: "CANCELLED" };
+    // 取り消しでも「一度も送っていない」と「送ったが結果を確認できていない」は
+    // 意味がまったく違う。後者は、サーバー側で成立している可能性が残る。
+    if (cancelled()) return { ok: false, code: "CANCELLED", sent: attempt > 1 };
     try {
       return await operation();
     } catch (err) {
-      if (cancelled()) return { ok: false, code: "CANCELLED" };
+      if (cancelled()) return { ok: false, code: "CANCELLED", sent: true };
       const givingUp =
         !RETRYABLE.has(err?.code) ||
         attempt >= MAX_SEND_ATTEMPTS ||
@@ -1738,8 +1740,18 @@ function reportLateResult(what, result, room) {
     reportLate(`退出したルームで${what}の送信が完了しました。`, room, 0);
     return;
   }
-  // 世代の照合で取り消した場合は、送っていないので伝えることがない
-  if (result.code === "CANCELLED") return;
+  if (result.code === "CANCELLED") {
+    // 一度も送っていなければ、伝えることがない
+    if (!result.sent) return;
+    // 送ったあとに取り消した場合は、届いていた可能性が残る。
+    // 「記録できなかった」とも「できた」とも言えない。
+    reportLate(
+      `退出したルームで${what}を送りましたが、記録できたかどうか確認できませんでした。` +
+      "記録一覧で結果を確かめてください。",
+      room, 2
+    );
+    return;
+  }
   reportLate(`退出したルームで${what}を記録できませんでした。${describeCode(result.code)}`, room, 2);
 }
 
