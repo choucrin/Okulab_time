@@ -126,7 +126,8 @@ let reconcileEpoch = null;      // 実行中の突き合わせの世代(null な
 let reconcileFailures = 0;
 let suspectTimer = null;        // 購読どうしの食い違いを疑ってからの猶予
 let lastResubscribe = 0;
-let participantFailures = 0;    // 被験者用画面で記録できなかった操作の数
+let participantFailures = 0;    // 被験者用画面で記録できなかった操作の数(確定)
+let participantUnknown = 0;     // 送ったが結果を確認できなかった操作の数
 let recordsInFlight = 0;        // 走っている記録操作(書き出し・削除)の数
 let recordsOwner = 0;           // その操作の通し番号(後始末の横取りを防ぐ)
 const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
@@ -310,15 +311,28 @@ function showRoomScreen() {
 /**
  * 被験者用画面での失敗を実験者に伝える。
  * 被験者の画面には何も出せないため、実験者用画面に残る形で数だけ知らせる。
+ *
+ * サーバーが受け付けなかった押下と、送ったが結果を確認できなかった押下は
+ * 意味が違う。後者を「記録できなかった」と言い切ると、実際には残っている
+ * 記録を無いものとして扱わせてしまう。数えるところから分けておく。
+ *
+ * @param {boolean} [uncertain] 送信後に結果を確認できなかった場合は true
  */
-function noteParticipantFailure(code) {
-  participantFailures += 1;
+function noteParticipantFailure(code, uncertain = false) {
+  if (uncertain) participantUnknown += 1;
+  else participantFailures += 1;
   console.warn(`[okulab-time] 被験者用画面での操作を記録できませんでした(${code})`);
-  setConnError(
-    "participant",
-    `被験者用画面での操作を ${participantFailures} 件記録できませんでした。` +
-    "計測が開始されていなかった可能性があります。記録一覧を確認してください。"
-  );
+
+  let text = "";
+  if (participantFailures > 0) {
+    text += `被験者用画面での操作を ${participantFailures} 件記録できませんでした。` +
+            "計測が開始されていなかった可能性があります。";
+  }
+  if (participantUnknown > 0) {
+    text += `被験者用画面での操作 ${participantUnknown} 件は、` +
+            "記録できたかどうか確認できませんでした。";
+  }
+  setConnError("participant", text + "記録一覧を確認してください。");
 }
 
 /**
@@ -519,6 +533,7 @@ function enterRoom(roomId, role, participant = false) {
   recordsOwner += 1;                           // 前のルームの後始末に触らせない
   el.passageText.textContent = "";
   participantFailures = 0;
+  participantUnknown = 0;
   clearActionError();
   render();
   showRoomScreen();
@@ -1131,10 +1146,24 @@ async function onEnd(press) {
   const payload = { ...press, uid: state.uid };
 
   await withBusy(async () => {
-    const result = await send(
-      () => endSession(db, room, payload, expectedId),
-      () => epoch !== roomEpoch
-    );
+    let result;
+    try {
+      result = await send(
+        () => endSession(db, room, payload, expectedId),
+        () => epoch !== roomEpoch
+      );
+    } catch (err) {
+      // 被験者用画面では、失敗を被験者に見せられない。withBusy に任せると
+      // エラー欄に出るだけで、次の押下の頭で消える。被験者は押せたつもりの
+      // まま進むので、押下が失われた事実がどこにも残らない。
+      // 件数として積み上がる経路に載せ、実験者が必ず気づけるようにする。
+      if (state.participant && epoch === roomEpoch) {
+        // 送り切れなかっただけとは限らない。最後の送信が届いていた
+        // 可能性が残るので、「記録できなかった」とは言い切らない。
+        return noteParticipantFailure(err?.code ?? "通信エラー", true);
+      }
+      throw err;
+    }
     if (epoch !== roomEpoch) return reportLateResult("計測終了", result, room);
     if (result.ok) {
       applyCurrent(null);   // 購読の到着を待たずに待機中へ戻す
