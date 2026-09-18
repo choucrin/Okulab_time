@@ -1221,10 +1221,17 @@ async function onClearAll() {
   state.busy = true;                 // 削除中は計測操作と退出の警告に反映させる
   renderControls();
 
+  let total = 0;                     // 失敗時の内訳を出すため catch からも見る
+  let skipped = 0;                   // 進行中のため対象外にした件数
+  let started = false;               // 1 件でも削除を送ったか
+
   try {
     // 一覧の購読は上限があり、止まっていることもある。
     // 同意を得る件数は、必ずサーバーの実数にする。
-    const { refs, skipped } = await collectDeletable(db, room);
+    const counted = await collectDeletable(db, room);
+    const refs = counted.refs;
+    total = refs.length;
+    skipped = counted.skipped;
     if (epoch !== roomEpoch) return;
 
     if (refs.length === 0) {
@@ -1247,8 +1254,9 @@ async function onClearAll() {
     if (typed.trim() !== "削除") return toast("削除を取り消しました");
 
     el.btnClear.textContent = `削除中… 0/${refs.length}`;
-    const deleted = await deleteSessions(db, refs, (done, total) => {
-      if (epoch === roomEpoch) el.btnClear.textContent = `削除中… ${done}/${total}`;
+    started = true;
+    const deleted = await deleteSessions(db, refs, (done, all) => {
+      if (epoch === roomEpoch) el.btnClear.textContent = `削除中… ${done}/${all}`;
     });
     if (epoch !== roomEpoch) return;
 
@@ -1256,10 +1264,40 @@ async function onClearAll() {
     toast(`${deleted} 件を削除しました${note}`);
   } catch (err) {
     if (epoch !== roomEpoch) return;
-    // 途中まで消えている場合があるので、その件数を必ず伝える
-    const done = typeof err?.deleted === "number" && err.deleted > 0
-      ? `${err.deleted} 件を削除したところで中断しました。` : "";
-    showError(el.actionError, done + describeError(err));
+
+    // 対象を数える段階での失敗。まだ何も送っていないので、
+    // 「中断した」と伝えると消えたかどうかを疑わせてしまう。
+    if (!started) {
+      showError(el.actionError, "削除する記録を数えられませんでした。" + reasonForReport(err));
+      return;
+    }
+
+    // 対象の全件を、確定・結果不明・未着手に分けて必ず伝える。
+    // どれか 1 つでも欠けると、残っている記録を見落とすことになる。
+    const count = (v) => (typeof v === "number" && v > 0 ? v : 0);
+    const deleted = count(err?.deleted);
+    const pending = count(err?.pending);      // 送ったが結果を確認できなかった分
+    const untouched = Math.max(total - deleted - pending, 0);
+
+    const done = deleted > 0
+      ? `${deleted} 件を削除したところで中断しました。`
+      : "削除を中断しました。";
+    // 打ち切った分は「消えたとも残ったとも言えない」。
+    // 消えた前提で扱うと、残っている記録を見落とす。
+    const unknown = pending > 0
+      ? `次の ${pending} 件は、削除できたかどうか確認できませんでした` +
+        "(あとから削除される場合があります)。"
+      : "";
+    const left = untouched > 0 ? `残る ${untouched} 件は削除していません。` : "";
+    // 一覧を見比べたときに数が合うよう、最初から対象外の分も伝える
+    const kept = (skipped > 0 ? `進行中の ${skipped} 件は最初から対象外です。` : "") +
+      (deleted > 0 || pending > 0 ? "記録一覧で結果を確かめてください。" : "");
+    // この件数は画面にしか残らない。再読み込みを促す文言より前に出す。
+    const advice = deleted > 0 || pending > 0
+      ? "【この件数は再読み込みすると消えます。先に控えてください。】"
+      : "";
+
+    showError(el.actionError, advice + done + reasonForReport(err) + unknown + left + kept);
   } finally {
     // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)
     setRecordsBusy(false);
@@ -1495,5 +1533,31 @@ function describeError(err) {
       "API キーが正しくありません。js/firebase-config.js を確認してください。",
   };
   if (table[code]) return table[code];
-  return (err?.message ?? String(err)) + (code ? `(${code})` : "");
+
+  // こちらが利用者向けに書いた文言だけをそのまま出す
+  if (err?.userMessage) return err.userMessage;
+
+  // 処理系のメッセージを見出しにしても、利用者には手がかりにならない。
+  // ただし実機は iPad でコンソールを開けないため、消してしまうと
+  // 開発者に伝える手段が無くなる(この版で直した不具合も、利用者が
+  // 画面のメッセージを写して報告したことで分かった)。
+  // 案内を主にしたうえで、詳細も添える。
+  console.error("[okulab-time] 想定外のエラー", err);
+  const raw = err?.message ?? (typeof err === "string" ? err : "");
+  const detail = [code, raw].filter(Boolean).join(": ").slice(0, 120);
+  return "予期しないエラーが発生しました。ページを再読み込みしてください。" +
+    (detail ? `(詳細: ${detail})` : "");
+}
+
+/**
+ * 削除の内訳に添える理由。
+ *
+ * 「ページを再読み込みしてください」「もう一度お試しください」は取り除く。
+ * 件数は画面にしか残らないため、その場で従うと確かめるべき数が消える。
+ * 語句単位で消すと「通信状況を確認してもう一度お試しください。」が
+ * 「通信状況を確認して」で切れるので、文の切れ目にあるものだけを外す。
+ */
+function reasonForReport(err) {
+  return describeError(err)
+    .replace(/(^|。)(?:ページを再読み込みしてください|もう一度お試しください)。/g, "$1");
 }
