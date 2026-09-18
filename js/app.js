@@ -703,10 +703,17 @@ function watch(subscribe, onData, key) {
 }
 
 function onLeave() {
-  const message = (state.busy || recordsBusy)
+  const warning = (state.busy || recordsBusy)
     ? "処理中の操作があります。中断してこのルームから退出しますか?\n" +
       "(すでにサーバーに届いていた場合、その操作は記録として残ります)"
     : "このルームから退出します。よろしいですか?";
+
+  // 未解決の削除の件数は、退出でこの欄から消える。
+  // 決める前に、その場で見せる(退出後も持ち越しはするが、
+  // 画面の外へ移る前に読む機会を必ず作る)。
+  const report = deleteReportText();
+  const message = report ? `${report}\n\n― この内容は退出すると消えます。―\n\n${warning}` : warning;
+
   if (!confirm(message)) return;
   leaveRoom();
 }
@@ -726,6 +733,10 @@ function teardownRoom() {
 }
 
 function leaveRoom() {
+  // 退出でエラー欄は消える。未解決の件数はここにしか残らないので、
+  // 持ち越す知らせへ移してから消す(そちらは保存され、参加画面にも出る)。
+  for (const r of deleteReports) reportLate("退出したルームについて。" + r.text, null, 2);
+
   teardownRoom();
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
 
@@ -1178,7 +1189,7 @@ async function onRecordClick(event) {
       : `${handle}を削除できませんでした。${reasonForReport(err)}`;
 
     // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
-    if (epoch !== roomEpoch) return reportLate("退出したルームについて。" + text, room, uncertain);
+    if (epoch !== roomEpoch) return reportLate("退出したルームについて。" + text, room, uncertain ? 2 : 1);
 
     // 結果不明を伝える文言は、計測操作では消さない
     if (uncertain) keepDeleteReport("row", text, id);
@@ -1367,7 +1378,7 @@ async function onClearAll() {
     // 件数を捨てるわけにはいかないので、その場で知らせる。
     // 持ち越す知らせは保存されるため、再読み込みの注意は付けない。
     if (epoch !== roomEpoch) {
-      return reportLate("退出したルームについて。" + body, room, true);
+      return reportLate("退出したルームについて。" + body, room, 2);
     }
 
     const report = advice + body;
@@ -1450,7 +1461,7 @@ async function exportCsv() {
   } catch (err) {
     const failure = "CSV 書き出しに失敗しました。" + reasonForReport(err);
     // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
-    if (!here()) return reportLate("退出したルームの" + failure, room, true);
+    if (!here()) return reportLate("退出したルームの" + failure, room, 1);
     notice(failure, "csv");
   } finally {
     setRecordsBusy(false);
@@ -1685,23 +1696,24 @@ function dismissActionError() {
  * 割り込むダイアログは使わない(実験中に出ると計測の押下そのものを
  * 奪い、押下時刻が閉じた時刻になる)。
  *
- * @param {boolean} [important] 記録一覧を見ても分からない結果か。
- *   成功したことは一覧で確かめられるが、「消えたか分からない」は
- *   ここにしか残らない。上限で落とすときはそちらを最後まで残す。
+ * @param {number} [rank] 残す優先度。0 = 記録一覧で確かめられる結果、
+ *   1 = 保存できていない・失敗(やり直せる)、2 = 消えたかどうか
+ *   分からない(ここにしか残らない)。上限で落とすときは低いものから。
  */
-function reportLate(message, room, important = false) {
+function reportLate(message, room, rank = 0) {
   // 画面から消えても追えるよう、必ず記録に残す
   console.warn("[okulab-time] " + message);
 
   // 同じ文言でも別の操作の結果なので、まとめない。どれがいつ・どのルームの
   // ことか分かるよう、日時とルームを添える。
   const where = room ? ` [room ${room.slice(0, 6)}]` : "";
-  lateReports.push({ text: `${formatFull(Date.now())}${where} ${message}`, important });
+  lateReports.push({ text: `${formatFull(Date.now())}${where} ${message}`, rank });
 
-  // 上限を超えたら、取り返しのつくものから落とす
+  // 上限を超えたら、優先度の低いものから、同じなら古いものから落とす。
+  // 一律に古い順で落とすと、ここにしか残らない件数が真っ先に消える。
   while (lateReports.length > MAX_LATE_REPORTS) {
-    const at = lateReports.findIndex((r) => !r.important);
-    lateReports.splice(at === -1 ? 0 : at, 1);
+    const lowest = Math.min(...lateReports.map((r) => r.rank ?? 0));
+    lateReports.splice(lateReports.findIndex((r) => (r.rank ?? 0) === lowest), 1);
   }
 
   saveLateReports();
@@ -1751,7 +1763,7 @@ function loadLateReports() {
     const saved = JSON.parse(localStorage.getItem(LATE_KEY) ?? "[]");
     if (!Array.isArray(saved)) return;
     lateReports = saved
-      .map((r) => (typeof r === "string" ? { text: r, important: true } : r))
+      .map((r) => (typeof r === "string" ? { text: r, rank: 2 } : r))
       .filter((r) => r && typeof r.text === "string");
   } catch { /* 読めなければ何も持ち越さない */ }
 }

@@ -115,12 +115,6 @@
     <!-- 接続の警告(操作エラーとは別枠。操作しても消えない) -->
     <p id="conn-error" class="notice notice--bad" role="alert" hidden></p>
 
-    <!-- 退出したあとに終わった操作の結果(参加画面にも同じものを出す) -->
-    <p id="late-report-main" class="notice notice--warn" role="status" hidden></p>
-    <button type="button" class="btn btn--ghost btn--sm" id="btn-dismiss-late-main" hidden>
-      上の内容を消す
-    </button>
-
     <!-- 時刻同期の警告 -->
     <p id="clock-warning" class="notice notice--warn" role="status" hidden></p>
 
@@ -152,6 +146,14 @@
     <p id="action-error" class="error" role="alert" hidden></p>
     <!-- 削除の内訳は操作では消えない。消すのは明示的な操作だけにする -->
     <button type="button" class="btn btn--ghost btn--sm" id="btn-dismiss-report" hidden>
+      上の内容を消す
+    </button>
+
+    <!-- 退出したあとに終わった操作の結果(参加画面にも同じものを出す)。
+         あとから現れるため、大きな計測ボタンより下に置く。上に出すと
+         実験中にボタンが動き、押し間違いを招く -->
+    <p id="late-report-main" class="notice notice--warn" role="status" hidden></p>
+    <button type="button" class="btn btn--ghost btn--sm" id="btn-dismiss-late-main" hidden>
       上の内容を消す
     </button>
 
