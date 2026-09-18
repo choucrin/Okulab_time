@@ -523,6 +523,10 @@ function enterRoom(roomId, role, participant = false) {
   state.currentLoaded = false;
   state.abortHint = false;
   state.showMissing = false;
+  // teardownRoom で世代が変わるため、走っている送信は自分で busy を戻さない。
+  // ここで戻さないと、計測ボタンが押せないままのルームに入ることになる(9-01)。
+  state.busy = false;
+  state.sending = false;
 
   state.participant = participant && role === "end";
   saveSession();
