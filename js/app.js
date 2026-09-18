@@ -138,7 +138,7 @@ let deleteReports = [];         // 未解決の削除結果({ kind, key, text })
 let noticeText = "";            // その後ろに添える、ほかの操作からの知らせ
 let noticeOwner = null;         // その知らせを出した操作
 let noticeKey = null;           // その知らせが指している対象(記録の id など)
-let lateReports = [];           // 退出したあとに終わった操作の結果({ text, important })
+let lateReports = [];           // 退出したあとに終わった操作の結果({ text, rank })
 
 // ── 起動 ────────────────────────────────────────────────────
 
@@ -150,6 +150,15 @@ function main() {
   window.addEventListener("unhandledrejection", (event) => {
     console.error("[okulab-time] 未処理のエラー:", event.reason);
   });
+
+  // 前回の起動で伝えきれなかった結果を、まず出す。
+  // 設定不備や初期化の失敗でも消えないようにする(そこで止まるときこそ、
+  // 前回の「消えたか分からない」を読む機会が要る)。
+  // 消す手立ても同時に配線する。押せるのに効かないボタンは出さない。
+  el.btnDismissLate.addEventListener("click", dismissLateReports);
+  el.btnDismissLateMain.addEventListener("click", dismissLateReports);
+  loadLateReports();
+  renderLateReports();
 
   if (!isConfigured(firebaseConfig)) {
     show("config");
@@ -169,8 +178,6 @@ function main() {
 
   signIn();
   bindEvents();
-  loadLateReports();      // 前回の起動で伝えきれなかった結果を出し直す
-  renderLateReports();
   restore();
 }
 
@@ -243,8 +250,6 @@ function bindEvents() {
   // 消すのは押した意思のあるときだけ。欄そのものを押せるようにすると、
   // 大きな計測ボタンの隣で誤って触れ、確認ダイアログが次の押下を飲み込む。
   el.btnDismissReport.addEventListener("click", dismissActionError);
-  el.btnDismissLate.addEventListener("click", dismissLateReports);
-  el.btnDismissLateMain.addEventListener("click", dismissLateReports);
 
   el.btnParticipant.addEventListener("click", () => setParticipant(true));
   el.btnExperimenter.addEventListener("click", () => setParticipant(false));
