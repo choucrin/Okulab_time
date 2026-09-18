@@ -71,6 +71,7 @@ const el = {
   startSub:      $("start-sub"),
   endSub:        $("end-sub"),
   actionError:   $("action-error"),
+  btnDismissReport: $("btn-dismiss-report"),
   recordCount:   $("record-count"),
   recordBody:    $("record-body"),
   recordEmpty:   $("record-empty"),
@@ -121,6 +122,13 @@ let participantFailures = 0;    // 被験者用画面で記録できなかった
 let recordsBusy = false;        // 記録の書き出し・一括削除が動いている
 const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
 const connErrors = new Map();        // 購読ごとの接続エラー
+
+// エラー欄は 2 段構え。削除の内訳は、件数が画面にしか残らないため、
+// ほかの操作の知らせより優先して残す(操作を挟んだだけで消えない)。
+let deleteReports = [];         // 未解決の削除結果({ kind, key, text })
+let noticeText = "";            // その後ろに添える、ほかの操作からの知らせ
+let noticeOwner = null;         // その知らせを出した操作
+let noticeKey = null;           // その知らせが指している対象(記録の id など)
 
 // ── 起動 ────────────────────────────────────────────────────
 
@@ -220,6 +228,9 @@ function bindEvents() {
   el.btnClear.addEventListener("click", onClearAll);
   el.btnAbort.addEventListener("click", onAbort);
   el.recordBody.addEventListener("click", onRecordClick);
+  // 消すのは押した意思のあるときだけ。欄そのものを押せるようにすると、
+  // 大きな計測ボタンの隣で誤って触れ、確認ダイアログが次の押下を飲み込む。
+  el.btnDismissReport.addEventListener("click", dismissActionError);
 
   el.btnParticipant.addEventListener("click", () => setParticipant(true));
   el.btnExperimenter.addEventListener("click", () => setParticipant(false));
@@ -486,7 +497,7 @@ function enterRoom(roomId, role, participant = false) {
   setRecordsBusy(false);                       // 前のルームでの進行状態を持ち越さない
   el.passageText.textContent = "";
   participantFailures = 0;
-  hideError(el.actionError);
+  clearActionError();
   render();
   showRoomScreen();
   if (state.participant) nextPassage();   // 画面を出してから寸法を測る
@@ -721,7 +732,7 @@ function leaveRoom() {
   el.passageText.textContent = "";
 
   render();               // 前のルームの記録を画面に残さない
-  hideError(el.actionError);
+  clearActionError();
   el.clockWarning.hidden = true;
   show("join");
   el.inputRoom.focus();
@@ -1118,7 +1129,7 @@ async function onAbort() {
       applyCurrent(null);
       toast("計測を中止しました");
     } else {
-      showError(el.actionError, describeCode(result.code));
+      notice(describeCode(result.code), "action");
     }
   }, epoch);
 }
@@ -1135,16 +1146,23 @@ async function onRecordClick(event) {
 
   try {
     await deleteSession(db, state.roomId, id);
+    // 前に「消えたか分からない」と伝えた記録なら、確かに消えたので取り下げる
+    resolveDeleteReport("row", id);
+    clearNotice("row", id);
     toast("記録を削除しました");
   } catch (err) {
     // 消えたかどうか分からない場合に「削除できませんでした」と言い切ると、
     // 残っていない記録を残っていることにしてしまう(まとめ削除の
     // pending と同じ判断を 1 件削除でも使う)。
-    showError(el.actionError, isUncertain(err)
-      ? `${handle}は、削除できたかどうか確認できませんでした` +
+    if (isUncertain(err)) {
+      // 結果不明を伝える文言は、計測操作では消さない
+      keepDeleteReport("row",
+        `${handle}は、削除できたかどうか確認できませんでした` +
         `(あとから削除される場合があります)。${reasonForReport(err)}` +
-        "記録一覧で結果を確かめてください。"
-      : `${handle}を削除できませんでした。${reasonForReport(err)}`);
+        "記録一覧で結果を確かめてください。", id);
+    } else {
+      notice(`${handle}を削除できませんでした。${reasonForReport(err)}`, "row", id);
+    }
   }
 }
 
@@ -1176,7 +1194,7 @@ async function send(operation, cancelled = () => false) {
 }
 
 function handleCode(code) {
-  showError(el.actionError, describeCode(code));
+  notice(describeCode(code), "action");
   if (code === "ALREADY_RUNNING" && state.role !== "view") {
     // 進行中フラグが読めていなくても中止で復旧できるようにする
     state.abortHint = true;
@@ -1190,11 +1208,13 @@ function handleCode(code) {
 async function withBusy(fn, epoch = roomEpoch) {
   state.busy = true;
   renderControls();
-  hideError(el.actionError);
+  // 削除の内訳は消さない。計測操作を挟んだだけで、確かめるべき件数が
+  // 失われることになる。それ以外の知らせは、ここで片付けてよい。
+  clearNotice();
   try {
     await fn();
   } catch (err) {
-    if (epoch === roomEpoch) showError(el.actionError, describeError(err));
+    if (epoch === roomEpoch) notice(describeError(err), "action");
   } finally {
     if (epoch === roomEpoch) {
       state.busy = false;
@@ -1248,6 +1268,9 @@ async function onClearAll() {
     if (epoch !== roomEpoch) return;
 
     if (refs.length === 0) {
+      // 消えたか分からなかった記録も、もう残っていないことが確かめられた
+      clearDeleteReport();
+      clearNotice("clear");
       toast(skipped > 0 ? "進行中の計測しかありません" : "削除する記録がありません");
       return;
     }
@@ -1273,6 +1296,10 @@ async function onClearAll() {
     });
     if (epoch !== roomEpoch) return;
 
+    // ここまで来れば前回の内訳は解決済み。古い件数も、前回の知らせも残さない
+    clearDeleteReport();
+    clearNotice("clear");
+    clearNotice("row");
     const note = skipped > 0 ? `(進行中の ${skipped} 件は残しました)` : "";
     toast(`${deleted} 件を削除しました${note}`);
   } catch (err) {
@@ -1281,7 +1308,7 @@ async function onClearAll() {
     // 対象を数える段階での失敗。まだ何も送っていないので、
     // 「中断した」と伝えると消えたかどうかを疑わせてしまう。
     if (!started) {
-      showError(el.actionError, "削除する記録を数えられませんでした。" + reasonForReport(err));
+      notice("削除する記録を数えられませんでした。" + reasonForReport(err), "clear");
       return;
     }
 
@@ -1310,7 +1337,15 @@ async function onClearAll() {
       ? "【この件数は再読み込みすると消えます。先に控えてください。】"
       : "";
 
-    showError(el.actionError, advice + done + reasonForReport(err) + unknown + left + kept);
+    const report = advice + done + reasonForReport(err) + unknown + left + kept;
+    if (deleted > 0 || pending > 0) {
+      // 新しい内訳のほうが確かなので、こちらを控えとして残す
+      keepDeleteReport("clear", report);
+    } else {
+      // 今回は何も送れていない。前回の「確認できなかった件数」は
+      // まだ有効なので、消さずに後ろへ添える。
+      notice(report, "clear");
+    }
   } finally {
     // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)
     setRecordsBusy(false);
@@ -1362,9 +1397,10 @@ async function exportCsv() {
     const text = "﻿" + lines.join("\r\n") + "\r\n";
     const name = `okulab-time_${state.roomId.slice(0, 6)}_${stamp()}.csv`;
     await saveFile(name, text);
+    clearNotice("csv");   // 前回の失敗の表示を残さない
     toast(`${rows.length} 件を書き出しました`);
   } catch (err) {
-    showError(el.actionError, describeError(err));
+    notice("CSV 書き出しに失敗しました。" + reasonForReport(err), "csv");
   } finally {
     setRecordsBusy(false);
   }
@@ -1486,6 +1522,120 @@ function show(name) {
 function showError(node, message) {
   node.textContent = message;
   node.hidden = false;
+}
+
+/**
+ * エラー欄を描き直す。
+ *
+ * 削除の件数は画面のこの欄にしか残らない。通信が切れている場面では
+ * 削除の打ち切りと次の操作の失敗が続けて起こるため、後から来た知らせで
+ * 上書きすると、確かめるべき件数そのものが失われる。
+ * 毎回 2 つの控えから作り直すので、繰り返しても文言は積み上がらない。
+ */
+function renderActionError() {
+  const report = deleteReportText();
+  const text = report && noticeText
+    ? `${report}(続けて: ${noticeText})`
+    : report || noticeText;
+
+  el.btnDismissReport.hidden = report === "";
+  if (!text) {
+    el.actionError.hidden = true;
+    el.actionError.textContent = "";
+    return;
+  }
+  el.actionError.textContent = text;
+  el.actionError.hidden = false;
+}
+
+/** 未解決の削除結果をひとつなぎにしたもの(空なら "") */
+function deleteReportText() {
+  return deleteReports.map((r) => r.text).join("\n");
+}
+
+/** ほかの操作からの知らせを出す(削除の内訳は消さない) */
+function notice(message, owner, key = null) {
+  noticeText = message;
+  noticeOwner = owner;
+  noticeKey = key;
+  renderActionError();
+}
+
+/**
+ * 知らせを消す。
+ * 持ち主を指定すると自分が出した分だけ、対象まで指定すると
+ * その対象についての分だけを消す(別の記録についての知らせを
+ * 巻き添えにしない)。何も指定しなければ、どの知らせでも消す。
+ */
+function clearNotice(owner, key) {
+  if (owner !== undefined && noticeOwner !== owner) return;
+  if (key !== undefined && noticeKey !== key) return;
+  noticeText = "";
+  noticeOwner = null;
+  noticeKey = null;
+  renderActionError();
+}
+
+/**
+ * 削除の結果を控える。以後、ほかの操作では消えない。
+ *
+ * まとめ削除の内訳は、新しいものがサーバーを読み直した結果なので
+ * 置き換える。1 件削除の「消えたか分からない」は件ごとに別の事実なので
+ * 積み上げる(同じ記録を押し直した場合だけ重ねない)。
+ */
+function keepDeleteReport(kind, text, key = kind) {
+  if (kind === "clear") deleteReports = deleteReports.filter((r) => r.kind !== "clear");
+
+  const existing = deleteReports.find((r) => r.kind === kind && r.key === key);
+  if (existing) existing.text = text;
+  else deleteReports.push({ kind, key, text });
+
+  // 画面から消えても追えるよう、控えた時点で必ず記録に残す
+  console.warn("[okulab-time] 削除の結果: " + text);
+
+  // 自分が前に出した、同じ対象についての知らせだけを置き換える
+  if (noticeOwner === kind && (noticeKey === null || noticeKey === key)) {
+    noticeText = "";
+    noticeOwner = null;
+    noticeKey = null;
+  }
+  renderActionError();
+}
+
+/** 削除の結果が解決したので取り下げる(添えられた知らせは残す) */
+function clearDeleteReport() {
+  deleteReports = [];
+  renderActionError();
+}
+
+/** その対象だけ解決した(押し直して確かに消えた場合など) */
+function resolveDeleteReport(kind, key) {
+  const before = deleteReports.length;
+  deleteReports = deleteReports.filter((r) => !(r.kind === kind && r.key === key));
+  if (deleteReports.length !== before) renderActionError();
+}
+
+/** 読み終えた内訳を消す(内訳がある間だけ効く) */
+function dismissActionError() {
+  if (deleteReports.length === 0) return;
+  // 取り消せない操作の件数。誤って触れただけで消さない。
+  // 添えられた知らせも一緒に消えるので、確認にも載せる。
+  const shown = [deleteReportText(), noticeText].filter(Boolean).join("\n");
+  if (!confirm(`${shown}\n\nこの内容を消します。控えましたか?`)) return;
+  clearDeleteReport();
+  clearNotice();
+}
+
+/**
+ * エラー欄を空にする(ルームの出入り)。
+ * この欄は必ず控えから組み立てる。直接書き込むと、次の知らせで黙って消える。
+ */
+function clearActionError() {
+  deleteReports = [];
+  noticeText = "";
+  noticeOwner = null;
+  noticeKey = null;
+  renderActionError();
 }
 
 function hideError(node) {

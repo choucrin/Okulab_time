@@ -481,6 +481,8 @@ button:focus-visible {
 .error {
   color: var(--end);
   font-size: 0.86rem;
+  /* 削除の内訳は行ごとに分けて示すため、改行をそのまま出す */
+  white-space: pre-wrap;
   margin: 10px 0 0;
   padding: 10px 12px;
   background: var(--surface-2);   /* color-mix 非対応時のフォールバック */
