@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |---|---|
 | プロジェクト名 | Okulab Time |
-| 現行バージョン | v.02.0 |
+| 現行バージョン | v.02.1 |
 | 作成日 | 2026-08-01 |
 | リポジトリ | https://github.com/choucrin/Okulab_time |
 | 公開 URL | https://choucrin.github.io/Okulab_time/ |

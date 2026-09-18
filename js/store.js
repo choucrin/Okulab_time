@@ -24,10 +24,44 @@ export const SESSION_LIMIT = 300;
 /** 一括削除の 1 回あたりの件数(Firestore の上限は 500 操作) */
 const BATCH_SIZE = 400;
 
+/**
+ * 削除の確定を待つ上限。
+ * 通信が切れると解決も棄却もしないことがあるため、必ず打ち切る。
+ */
+const COMMIT_TIMEOUT_MS = 15000;
+
+/**
+ * 全件の読み出しを待つ上限。
+ * 打ち切らないと、書き出しと一括削除が動いたままになり、
+ * どちらの操作も始められなくなる。
+ *
+ * ただし短すぎると、記録が多いルームや遅い回線で CSV 書き出しが
+ * いつまでも成功しなくなる。一括削除の確認は「先に書き出して」と
+ * 案内しているため、書き出せないほうが害が大きい。固まるのを
+ * 防ぐのが目的なので、余裕を持って長めにとる。
+ */
+const READ_TIMEOUT_MS = 60000;
+
+/**
+ * 「消えなかった」と言い切れるコード。サーバーが書き込みを拒んだ場合に限る。
+ *
+ * 送信は commit() を呼んだ時点で出ていくため、これ以外の失敗では
+ * 届いていた可能性が残る。列挙するのは確実な側だけにし、
+ * 知らないコードは結果不明として扱う(誤って「残っている」と
+ * 伝えると、消えた記録を見落とすことになる)。
+ *
+ * not-found は入れない。削除では「見つからない = すでに無い」であり、
+ * 残っていることの証明にはならない。
+ */
+const REJECTED = new Set([
+  "permission-denied", "invalid-argument", "failed-precondition",
+  "out-of-range", "unimplemented",
+]);
+
 /** 合言葉 → ルーム ID(SHA-256) */
 export async function deriveRoomId(passphrase) {
   if (!globalThis.crypto?.subtle) {
-    throw new Error(
+    throw userError(
       "この環境では暗号 API が使えません。https:// または http://localhost で開いてください。"
     );
   }
@@ -189,9 +223,15 @@ export function abortSession(db, roomId, { uid, expectedId }) {
   });
 }
 
-/** 記録を 1 件削除する(進行中のものはルール側でも拒否される) */
+/**
+ * 記録を 1 件削除する(進行中のものはルール側でも拒否される)。
+ * まとめ送りと同じく、通信が切れたまま固まらないよう打ち切る。
+ *
+ * 打ち切りは「送ったが結果が分からない」状態。何が起きたかだけを返し、
+ * 「消えたか分からない」という言い方は呼び出し側が添える(重複を避ける)。
+ */
 export function deleteSession(db, roomId, id) {
-  return deleteDoc(sessionRef(db, roomId, id));
+  return withTimeout(deleteDoc(sessionRef(db, roomId, id)), COMMIT_TIMEOUT_MS);
 }
 
 /**
@@ -202,7 +242,11 @@ export function deleteSession(db, roomId, id) {
  * 並べ替えを指定すると、その項目を持たない記録が結果から漏れるため指定しない。
  */
 export async function collectDeletable(db, roomId) {
-  const snap = await getDocsFromServer(sessionsCol(db, roomId));
+  const snap = await withTimeout(
+    getDocsFromServer(sessionsCol(db, roomId)),
+    READ_TIMEOUT_MS,
+    "記録の数え上げに時間がかかりすぎました。通信状況を確認してください。"
+  );
   const targets = snap.docs.filter((d) => d.data().status !== "running");
   return { refs: targets.map((d) => d.ref), skipped: snap.docs.length - targets.length };
 }
@@ -211,7 +255,13 @@ export async function collectDeletable(db, roomId) {
  * 記録をまとめて削除する。**元に戻せない。**
  *
  * まとめて送る単位ごとに、全部消えるか 1 件も消えないかのどちらかになる。
- * 途中で失敗した場合、そこまでに済んだ件数を例外に添えて返す。
+ * 途中で失敗した場合、そこまでの内訳を例外に添えて返す。
+ *
+ * 例外には次を添える:
+ *   deleted … 確実に消えた件数(ここまでは確定)
+ *   pending … 結果を確認できなかった件数。送った後の失敗は、
+ *             後からサーバー側で確定することがあるため、
+ *             消えたとも残ったとも言えない。
  *
  * @param {(done:number, total:number) => void} [onProgress]
  * @returns {Promise<number>} 削除できた件数
@@ -221,32 +271,75 @@ export async function deleteSessions(db, refs, onProgress) {
 
   for (let i = 0; i < refs.length; i += BATCH_SIZE) {
     const chunk = refs.slice(i, i + BATCH_SIZE);
-    const batch = writeBatch(db);
-    for (const ref of chunk) batch.delete(ref);
+    let sent = false;
 
+    // まとめ送りの組み立ても try の中で行う。ここで投げた例外に
+    // 件数が付かないと、消えた記録を「残っている」と伝えてしまう。
     try {
+      const batch = writeBatch(db);
+      for (const ref of chunk) batch.delete(ref);
+      // 送信が出ていくのは commit() を呼んだ瞬間。呼ぶ前に印を付けると、
+      // 呼び出し自体が投げた場合(何も送っていない)まで結果不明になる。
+      const committing = batch.commit();
+      sent = true;
       // 通信が切れると解決も棄却もしないことがあるため打ち切る
-      await withTimeout(batch.commit(), COMMIT_TIMEOUT_MS);
-    } catch (err) {
+      await withTimeout(committing, COMMIT_TIMEOUT_MS);
+    } catch (cause) {
+      // 文字列などが投げられても目印を付けられるようにする
+      const err = cause && typeof cause === "object" ? cause : new Error(String(cause));
       err.deleted = deleted;       // ここまでは確実に消えている
+      // 拒否された場合だけ「消えなかった」と言える。送信を出した後は、
+      // それ以外の失敗では届いていた可能性が残る。
+      if (sent && !REJECTED.has(err.code)) err.pending = chunk.length;
       throw err;
     }
 
     deleted += chunk.length;
-    onProgress?.(deleted, refs.length);
+
+    try {
+      onProgress?.(deleted, refs.length);
+    } catch (err) {
+      // 進捗の表示は削除の成否と関係ない。ここで抜けると、
+      // 消えた件数を伝えられないまま失敗したように見えてしまう。
+      console.error("[okulab-time] 進捗の通知に失敗しました", err);
+    }
   }
 
   return deleted;
 }
 
-function withTimeout(promise, ms) {
+/**
+ * その失敗のあと、削除が成立している可能性が残るか。
+ *
+ * 送信は呼んだ時点で出ていくため、サーバーが拒んだと分かる場合を除いて
+ * 「消えたとも残ったとも言えない」。まとめ削除の pending と同じ判断を、
+ * 1 件削除でも使えるようにしたもの。
+ */
+export function isUncertain(err) {
+  return Boolean(err?.timedOut) || !REJECTED.has(err?.code);
+}
+
+function withTimeout(promise, ms, message = COMMIT_TIMEOUT_MESSAGE) {
   let timer;
   return Promise.race([
     promise.finally(() => clearTimeout(timer)),
     new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error("削除の確定に時間がかかりすぎました")), ms);
+      timer = setTimeout(() => reject(Object.assign(userError(message), { timedOut: true })), ms);
     }),
   ]);
+}
+
+const COMMIT_TIMEOUT_MESSAGE = "削除の確定に時間がかかりすぎました。通信状況を確認してください。";
+
+/**
+ * そのまま画面に出してよい例外。
+ * 目印が無い例外は処理系のメッセージなので、利用者には見せない
+ * (js/app.js の describeError を参照)。
+ */
+function userError(message) {
+  const err = new Error(message);
+  err.userMessage = message;
+  return err;
 }
 
 /** 記録一覧を購読する(開始時刻の新しい順・最新 SESSION_LIMIT 件) */
@@ -287,6 +380,10 @@ export async function fetchCurrentFromServer(db, roomId) {
  * 購読済みの分だけを「全件」として返してしまうため、必ずサーバーから読む。
  */
 export async function fetchAllSessions(db, roomId) {
-  const snap = await getDocsFromServer(query(sessionsCol(db, roomId), orderBy("startMs", "asc")));
+  const snap = await withTimeout(
+    getDocsFromServer(query(sessionsCol(db, roomId), orderBy("startMs", "asc"))),
+    READ_TIMEOUT_MS,
+    "記録の読み出しに時間がかかりすぎました。通信状況を確認してください。"
+  );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }

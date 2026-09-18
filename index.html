@@ -25,6 +25,13 @@
     <p><code>js/firebase-config.js</code> を開き、Firebase コンソールで発行した設定値に書き換えてください。</p>
     <p class="muted">手順は README.md の「セットアップ」を参照してください。</p>
     <p id="config-detail" class="muted mono"></p>
+
+    <!-- 退出したあとに終わった操作の結果。ここで起動が止まる場合こそ、
+         前回の「消えたか分からない」を読む機会が要る -->
+    <p class="notice notice--warn" role="status" data-late-report hidden></p>
+    <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
+      上の内容を消す
+    </button>
   </div>
 </section>
 
@@ -74,6 +81,12 @@
 
       <button type="submit" class="btn btn--primary" id="btn-join">この端末を参加させる</button>
       <p id="join-error" class="error" role="alert" hidden></p>
+      <!-- 持ち越した知らせは参加の失敗ではない。隣の赤い欄と同じ見た目に
+           すると、入室できなかった理由と読み違える -->
+      <p class="notice notice--warn" role="status" data-late-report hidden></p>
+      <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
+        上の内容を消す
+      </button>
     </form>
   </div>
 </section>
@@ -140,6 +153,18 @@
     </div>
 
     <p id="action-error" class="error" role="alert" hidden></p>
+    <!-- 削除の内訳は操作では消えない。消すのは明示的な操作だけにする -->
+    <button type="button" class="btn btn--ghost btn--sm" id="btn-dismiss-report" hidden>
+      上の内容を消す
+    </button>
+
+    <!-- 退出したあとに終わった操作の結果(参加画面にも同じものを出す)。
+         あとから現れるため、大きな計測ボタンより下に置く。上に出すと
+         実験中にボタンが動き、押し間違いを招く -->
+    <p class="notice notice--warn" role="status" data-late-report hidden></p>
+    <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
+      上の内容を消す
+    </button>
 
     <!-- 履歴 -->
     <section class="records">
@@ -193,7 +218,7 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.02.0</p>
+<p class="version" id="version">v.02.1</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
