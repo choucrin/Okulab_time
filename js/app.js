@@ -127,7 +127,9 @@ let reconcileFailures = 0;
 let suspectTimer = null;        // 購読どうしの食い違いを疑ってからの猶予
 let lastResubscribe = 0;
 let participantFailures = 0;    // 被験者用画面で記録できなかった操作の数
-let recordsBusy = false;        // 記録の書き出し・一括削除が動いている
+let recordsInFlight = 0;        // 走っている記録操作(書き出し・削除)の数
+let recordsOwner = 0;           // その操作の通し番号(後始末の横取りを防ぐ)
+let clearHoldsBusy = false;     // 一括削除が走っている(計測の送信とは別に数える)
 const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
 const connErrors = new Map();        // 購読ごとの接続エラー
 
@@ -507,7 +509,9 @@ function enterRoom(roomId, role, participant = false) {
   el.panelEnd.hidden = role !== "end";
   el.btnParticipant.hidden = role !== "end";   // 被験者用画面は終了側の端末だけ
   el.btnClear.hidden = role === "view";        // 削除は 1 件ずつの操作と同じ扱い
-  setRecordsBusy(false);                       // 前のルームでの進行状態を持ち越さない
+  resetRecordsLabels();                        // 前のルームの途中経過を持ち越さない
+  syncRecordsButtons();                        // 走っている操作があれば止めたままにする
+  recordsOwner += 1;                           // 前のルームの後始末に触らせない
   el.passageText.textContent = "";
   participantFailures = 0;
   clearActionError();
@@ -705,7 +709,7 @@ function watch(subscribe, onData, key) {
 }
 
 function onLeave() {
-  const warning = (state.busy || recordsBusy)
+  const warning = (state.busy || recordsInFlight > 0)
     ? "処理中の操作があります。中断してこのルームから退出しますか?\n" +
       "(すでにサーバーに届いていた場合、その操作は記録として残ります)"
     : "このルームから退出します。よろしいですか?";
@@ -755,6 +759,7 @@ function leaveRoom() {
   state.sessionsLoaded = false;
   state.currentLoaded = false;
   state.busy = false;
+  clearHoldsBusy = false;
   state.sending = false;
   state.abortHint = false;
   state.showMissing = false;
@@ -925,6 +930,7 @@ function stopTicker() {
 }
 
 function renderControls() {
+  syncRecordsButtons();   // 計測中は一括削除も押せない。見た目を合わせる
   const ready = state.currentLoaded;
   const running = Boolean(state.activeId);
   const synced = Boolean(clock?.ok);
@@ -1271,14 +1277,54 @@ async function withBusy(fn, epoch = roomEpoch) {
 //  どちらも全件をサーバーから読むため、同時に走らせてはならない。
 //  削除中に書き出すと、消えた分が抜けた CSV が「成功」として出てしまう。
 
-function setRecordsBusy(on) {
-  recordsBusy = on;
-  el.btnCsv.disabled = on;
-  el.btnClear.disabled = on;
-  if (!on) {
-    el.btnCsv.textContent = CSV_LABEL;
-    el.btnClear.textContent = CLEAR_LABEL;
-  }
+/**
+ * 記録操作(書き出し・一括削除)を始め、後始末の権利を受け取る。
+ *
+ * 後始末に世代ガードをかけてはならない(9-01)。退出すると復帰処理ごと
+ * 飛ばされ、ボタンが固まる。かわりに所有権で判断し、あとから終わった
+ * 古い操作が、いま動いている操作の状態を戻さないようにする。
+ */
+function startRecordsWork() {
+  recordsInFlight += 1;
+  syncRecordsButtons();
+  return ++recordsOwner;
+}
+
+/**
+ * 後始末する。すでに次の操作が始まっていれば、その操作に任せる。
+ * 一括削除の印を戻すかどうかは呼び出し側が決める。
+ */
+function finishRecordsWork(token, releaseClear = false) {
+  recordsInFlight = Math.max(recordsInFlight - 1, 0);
+  if (recordsInFlight === 0) resetRecordsLabels();
+  syncRecordsButtons();
+
+  if (recordsOwner !== token) return;   // すでに次の操作が状態を握っている
+  if (releaseClear) clearHoldsBusy = false;
+  renderControls();
+}
+
+/**
+ * 記録操作のボタンを、走っている操作の数から組み立てる。
+ *
+ * 表示だけを戻すと、押しても何も起きないボタンになる。逆に走っている
+ * 操作を無視して押せるようにすると、全件を読む操作が重なり、
+ * 欠けた CSV が「成功」として出る(9-02)。
+ */
+function syncRecordsButtons() {
+  const working = recordsInFlight > 0;
+  el.btnCsv.disabled = working;
+  el.btnClear.disabled = working || state.busy || clearHoldsBusy;
+}
+
+/**
+ * ボタンの表示を既定に戻す。
+ * 走っている操作の途中経過を持ち越すと、入り直したルームで
+ * 「削除中… 12/300」が残り、そのルームで何かが動いているように見える。
+ */
+function resetRecordsLabels() {
+  el.btnCsv.textContent = CSV_LABEL;
+  el.btnClear.textContent = CLEAR_LABEL;
 }
 
 /**
@@ -1286,14 +1332,19 @@ function setRecordsBusy(on) {
  * 研究データを失う操作なので、実際の件数を示したうえで確認を二段階にしている。
  */
 async function onClearAll() {
-  if (recordsBusy || state.busy || !state.roomId) return;
+  // 入室でボタンの表示は戻るが、前のルームの操作がまだ走っていることがある。
+  // 全件を読む操作どうしを重ねると、欠けた CSV が「成功」として出る(9-02)。
+  if (recordsInFlight > 0 || state.busy || clearHoldsBusy || !state.roomId) return;
 
   const room = state.roomId;
   const epoch = roomEpoch;
 
-  setRecordsBusy(true);
+  const token = startRecordsWork();
   el.btnClear.textContent = "確認中…";
-  state.busy = true;                 // 削除中は計測操作と退出の警告に反映させる
+  // 計測操作は止めない。一括削除は数え上げと確定で 30 秒を超えることがあり、
+  // その間に被験者が終了を押すと、押した瞬間そのものが失われる。
+  // 削除の対象は開始前に数え終えているため、計測と重なっても影響しない。
+  clearHoldsBusy = true;
   renderControls();
 
   let total = 0;                     // 失敗時の内訳を出すため catch からも見る
@@ -1396,10 +1447,9 @@ async function onClearAll() {
       notice(body, "clear");
     }
   } finally {
-    // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)
-    setRecordsBusy(false);
-    state.busy = false;
-    renderControls();
+    // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)。
+    // ただし、あとから終わった古い操作が今の操作の状態を戻さないようにする。
+    finishRecordsWork(token, true);
   }
 }
 
@@ -1419,14 +1469,14 @@ const CSV_HEADER = [
 ];
 
 async function exportCsv() {
-  if (recordsBusy || !state.roomId) return;
+  if (recordsInFlight > 0 || !state.roomId) return;
   // 読み込み中に退出されても、書き出し先は操作した時点のルームに固定する
   // (state から取り直すと、退出後に null を触って黙って失敗する)
   const room = state.roomId;
   const epoch = roomEpoch;
   const here = () => epoch === roomEpoch;
 
-  setRecordsBusy(true);
+  const token = startRecordsWork();
   el.btnCsv.textContent = "取得中…";
   try {
     const rows = await fetchAllSessions(db, room);
@@ -1469,7 +1519,7 @@ async function exportCsv() {
     if (!here()) return reportLate("退出したルームの" + failure, room, 1);
     notice(failure, "csv");
   } finally {
-    setRecordsBusy(false);
+    finishRecordsWork(token);
   }
 }
 
