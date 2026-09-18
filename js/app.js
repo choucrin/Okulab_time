@@ -12,7 +12,7 @@ import { PASSAGES } from "./passages.js";
 import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
-  collectDeletable, deleteSessions, SESSION_LIMIT,
+  collectDeletable, deleteSessions, isUncertain, SESSION_LIMIT,
 } from "./store.js";
 
 export const APP_VERSION = "v.02.1";
@@ -1126,12 +1126,25 @@ async function onAbort() {
 async function onRecordClick(event) {
   const button = event.target.closest("button.del");
   if (!button) return;
+  const id = button.dataset.id;
   if (!confirm("この記録を削除します。よろしいですか?")) return;
+
+  // どの記録だったかは、消えたあとでは分からなくなる。先に控える。
+  const target = state.sessions.find((s2) => s2.id === id);
+  const handle = target ? `${formatClock(target.startMs)} 開始の記録` : "この記録";
+
   try {
-    await deleteSession(db, state.roomId, button.dataset.id);
+    await deleteSession(db, state.roomId, id);
     toast("記録を削除しました");
   } catch (err) {
-    showError(el.actionError, describeError(err));
+    // 消えたかどうか分からない場合に「削除できませんでした」と言い切ると、
+    // 残っていない記録を残っていることにしてしまう(まとめ削除の
+    // pending と同じ判断を 1 件削除でも使う)。
+    showError(el.actionError, isUncertain(err)
+      ? `${handle}は、削除できたかどうか確認できませんでした` +
+        `(あとから削除される場合があります)。${reasonForReport(err)}` +
+        "記録一覧で結果を確かめてください。"
+      : `${handle}を削除できませんでした。${reasonForReport(err)}`);
   }
 }
 
@@ -1499,6 +1512,8 @@ function describeCode(code) {
     SESSION_CHANGED: "操作しようとした計測が、別の計測に切り替わっていました。" +
                      "取り違えを避けるため何もしていません。画面の状態を確認してから操作し直してください。",
     ALREADY_ENDED:   "この計測は、すでに別の端末で終了しています。",
+    // 呼び出し側が世代の照合で先に抜けるため、いまは表示に至らない。
+    // 照合の順序が変わったときに文言が無い状態にしないため残している。
     CANCELLED:       "ルームを移動したため、操作を取り消しました。",
   }[code] ?? `処理できませんでした(${code})`;
 }
