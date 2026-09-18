@@ -15,7 +15,7 @@ import {
   collectDeletable, deleteSessions, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.02.0";
+export const APP_VERSION = "v.02.1";
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
