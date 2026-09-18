@@ -19,6 +19,8 @@ export const APP_VERSION = "v.02.1";
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
+const LATE_KEY = "okulab-time/late";       // 退出後に終わった操作の結果(再読み込みでも失わない)
+const MAX_LATE_REPORTS = 20;               // 持ち越す知らせの上限
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
 const PRESS_FRESH_MS = 15000;   // pointerdown で拾った時刻を有効とみなす猶予
 const MAX_SEND_ATTEMPTS = 5;
@@ -72,6 +74,10 @@ const el = {
   endSub:        $("end-sub"),
   actionError:   $("action-error"),
   btnDismissReport: $("btn-dismiss-report"),
+  lateReport:        $("late-report"),
+  lateReportMain:    $("late-report-main"),
+  btnDismissLate:     $("btn-dismiss-late"),
+  btnDismissLateMain: $("btn-dismiss-late-main"),
   recordCount:   $("record-count"),
   recordBody:    $("record-body"),
   recordEmpty:   $("record-empty"),
@@ -129,6 +135,7 @@ let deleteReports = [];         // 未解決の削除結果({ kind, key, text })
 let noticeText = "";            // その後ろに添える、ほかの操作からの知らせ
 let noticeOwner = null;         // その知らせを出した操作
 let noticeKey = null;           // その知らせが指している対象(記録の id など)
+let lateReports = [];           // 退出したあとに終わった操作の結果({ text, important })
 
 // ── 起動 ────────────────────────────────────────────────────
 
@@ -159,6 +166,8 @@ function main() {
 
   signIn();
   bindEvents();
+  loadLateReports();      // 前回の起動で伝えきれなかった結果を出し直す
+  renderLateReports();
   restore();
 }
 
@@ -231,6 +240,8 @@ function bindEvents() {
   // 消すのは押した意思のあるときだけ。欄そのものを押せるようにすると、
   // 大きな計測ボタンの隣で誤って触れ、確認ダイアログが次の押下を飲み込む。
   el.btnDismissReport.addEventListener("click", dismissActionError);
+  el.btnDismissLate.addEventListener("click", dismissLateReports);
+  el.btnDismissLateMain.addEventListener("click", dismissLateReports);
 
   el.btnParticipant.addEventListener("click", () => setParticipant(true));
   el.btnExperimenter.addEventListener("click", () => setParticipant(false));
@@ -1140,12 +1151,17 @@ async function onRecordClick(event) {
   const id = button.dataset.id;
   if (!confirm("この記録を削除します。よろしいですか?")) return;
 
+  // 送信中に退出されても、別のルームの記録を消したり
+  // 別のルームの画面に書き込んだりしない
+  const room = state.roomId;
+  const epoch = roomEpoch;
   // どの記録だったかは、消えたあとでは分からなくなる。先に控える。
   const target = state.sessions.find((s2) => s2.id === id);
   const handle = target ? `${formatClock(target.startMs)} 開始の記録` : "この記録";
 
   try {
-    await deleteSession(db, state.roomId, id);
+    await deleteSession(db, room, id);
+    if (epoch !== roomEpoch) return reportLate("退出したルームの記録を 1 件削除しました。", room);
     // 前に「消えたか分からない」と伝えた記録なら、確かに消えたので取り下げる
     resolveDeleteReport("row", id);
     clearNotice("row", id);
@@ -1154,15 +1170,19 @@ async function onRecordClick(event) {
     // 消えたかどうか分からない場合に「削除できませんでした」と言い切ると、
     // 残っていない記録を残っていることにしてしまう(まとめ削除の
     // pending と同じ判断を 1 件削除でも使う)。
-    if (isUncertain(err)) {
-      // 結果不明を伝える文言は、計測操作では消さない
-      keepDeleteReport("row",
-        `${handle}は、削除できたかどうか確認できませんでした` +
+    const uncertain = isUncertain(err);
+    const text = uncertain
+      ? `${handle}は、削除できたかどうか確認できませんでした` +
         `(あとから削除される場合があります)。${reasonForReport(err)}` +
-        "記録一覧で結果を確かめてください。", id);
-    } else {
-      notice(`${handle}を削除できませんでした。${reasonForReport(err)}`, "row", id);
-    }
+        "記録一覧で結果を確かめてください。"
+      : `${handle}を削除できませんでした。${reasonForReport(err)}`;
+
+    // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
+    if (epoch !== roomEpoch) return reportLate("退出したルームについて。" + text, room, uncertain);
+
+    // 結果不明を伝える文言は、計測操作では消さない
+    if (uncertain) keepDeleteReport("row", text, id);
+    else notice(text, "row", id);
   }
 }
 
@@ -1294,21 +1314,25 @@ async function onClearAll() {
     const deleted = await deleteSessions(db, refs, (done, all) => {
       if (epoch === roomEpoch) el.btnClear.textContent = `削除中… ${done}/${all}`;
     });
-    if (epoch !== roomEpoch) return;
+
+    const note = skipped > 0 ? `(進行中の ${skipped} 件は残しました)` : "";
+    if (epoch !== roomEpoch) {
+      // 退出後に終わった。取り消せない操作を黙って終わらせない
+      return reportLate(`退出したルームの記録 ${deleted} 件を削除しました${note}`, room);
+    }
 
     // ここまで来れば前回の内訳は解決済み。古い件数も、前回の知らせも残さない
     clearDeleteReport();
     clearNotice("clear");
     clearNotice("row");
-    const note = skipped > 0 ? `(進行中の ${skipped} 件は残しました)` : "";
     toast(`${deleted} 件を削除しました${note}`);
   } catch (err) {
-    if (epoch !== roomEpoch) return;
-
     // 対象を数える段階での失敗。まだ何も送っていないので、
     // 「中断した」と伝えると消えたかどうかを疑わせてしまう。
     if (!started) {
-      notice("削除する記録を数えられませんでした。" + reasonForReport(err), "clear");
+      const text = "削除する記録を数えられませんでした。" + reasonForReport(err);
+      if (epoch === roomEpoch) notice(text, "clear");
+      else reportLate("退出したルームについて。" + text, room);   // 黙って終わらせない
       return;
     }
 
@@ -1337,7 +1361,16 @@ async function onClearAll() {
       ? "【この件数は再読み込みすると消えます。先に控えてください。】"
       : "";
 
-    const report = advice + done + reasonForReport(err) + unknown + left + kept;
+    const body = done + reasonForReport(err) + unknown + left + kept;
+
+    // ルームを離れたあとに終わった場合、エラー欄はもう別のルームのもの。
+    // 件数を捨てるわけにはいかないので、その場で知らせる。
+    // 持ち越す知らせは保存されるため、再読み込みの注意は付けない。
+    if (epoch !== roomEpoch) {
+      return reportLate("退出したルームについて。" + body, room, true);
+    }
+
+    const report = advice + body;
     if (deleted > 0 || pending > 0) {
       // 新しい内訳のほうが確かなので、こちらを控えとして残す
       keepDeleteReport("clear", report);
@@ -1371,11 +1404,23 @@ const CSV_HEADER = [
 
 async function exportCsv() {
   if (recordsBusy || !state.roomId) return;
+  // 読み込み中に退出されても、書き出し先は操作した時点のルームに固定する
+  // (state から取り直すと、退出後に null を触って黙って失敗する)
+  const room = state.roomId;
+  const epoch = roomEpoch;
+  const here = () => epoch === roomEpoch;
+
   setRecordsBusy(true);
   el.btnCsv.textContent = "取得中…";
   try {
-    const rows = await fetchAllSessions(db, state.roomId);
-    if (rows.length === 0) return toast("書き出す記録がありません");
+    const rows = await fetchAllSessions(db, room);
+
+    if (rows.length === 0) {
+      // 黙って終わると、書き出せたのかどうかが分からない
+      if (here()) toast("書き出す記録がありません");
+      else reportLate("退出したルームには、書き出す記録がありませんでした。", room);
+      return;
+    }
 
     const lines = [CSV_HEADER.join(",")];
     for (const s of rows) {
@@ -1395,12 +1440,18 @@ async function exportCsv() {
 
     // 先頭の BOM は Excel に UTF-8 と認識させるために必要
     const text = "﻿" + lines.join("\r\n") + "\r\n";
-    const name = `okulab-time_${state.roomId.slice(0, 6)}_${stamp()}.csv`;
+    const name = `okulab-time_${room.slice(0, 6)}_${stamp()}.csv`;
+    // 退出していても、控えたルームの内容で書き出しは最後まで行う。
+    // 触らないのは画面の表示だけ(いまは別のルームのもの)。
     await saveFile(name, text);
+    if (!here()) return reportLate(`退出したルームの記録 ${rows.length} 件を書き出しました。`, room);
     clearNotice("csv");   // 前回の失敗の表示を残さない
     toast(`${rows.length} 件を書き出しました`);
   } catch (err) {
-    notice("CSV 書き出しに失敗しました。" + reasonForReport(err), "csv");
+    const failure = "CSV 書き出しに失敗しました。" + reasonForReport(err);
+    // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
+    if (!here()) return reportLate("退出したルームの" + failure, room, true);
+    notice(failure, "csv");
   } finally {
     setRecordsBusy(false);
   }
@@ -1624,6 +1675,85 @@ function dismissActionError() {
   if (!confirm(`${shown}\n\nこの内容を消します。控えましたか?`)) return;
   clearDeleteReport();
   clearNotice();
+}
+
+/**
+ * 退出したあとに終わった操作の結果を伝える。
+ *
+ * 元のルームのエラー欄はもう無いので、いまの画面に出すしかない。
+ * 出す先は実験者用画面と参加画面だけなので、被験者には見えない。
+ * 割り込むダイアログは使わない(実験中に出ると計測の押下そのものを
+ * 奪い、押下時刻が閉じた時刻になる)。
+ *
+ * @param {boolean} [important] 記録一覧を見ても分からない結果か。
+ *   成功したことは一覧で確かめられるが、「消えたか分からない」は
+ *   ここにしか残らない。上限で落とすときはそちらを最後まで残す。
+ */
+function reportLate(message, room, important = false) {
+  // 画面から消えても追えるよう、必ず記録に残す
+  console.warn("[okulab-time] " + message);
+
+  // 同じ文言でも別の操作の結果なので、まとめない。どれがいつ・どのルームの
+  // ことか分かるよう、日時とルームを添える。
+  const where = room ? ` [room ${room.slice(0, 6)}]` : "";
+  lateReports.push({ text: `${formatFull(Date.now())}${where} ${message}`, important });
+
+  // 上限を超えたら、取り返しのつくものから落とす
+  while (lateReports.length > MAX_LATE_REPORTS) {
+    const at = lateReports.findIndex((r) => !r.important);
+    lateReports.splice(at === -1 ? 0 : at, 1);
+  }
+
+  saveLateReports();
+  renderLateReports();
+}
+
+/** 持ち越している知らせをひとつなぎにしたもの */
+function lateReportText() {
+  return lateReports.map((r) => r.text).join("\n");
+}
+
+/**
+ * 持ち越している知らせを、参加画面と実験者用画面の両方に出す。
+ *
+ * 件数はここにしか残らない。参加画面にいる間は実験者用画面の欄が
+ * 隠れているため、両方に出さないと読む機会が無いまま消える。
+ */
+function renderLateReports() {
+  const shown = lateReportText();
+  for (const node of [el.lateReport, el.lateReportMain]) {
+    node.textContent = shown;
+    node.hidden = shown === "";
+  }
+  el.btnDismissLate.hidden = shown === "";
+  el.btnDismissLateMain.hidden = shown === "";
+}
+
+/** 読み終えた知らせを消す */
+function dismissLateReports() {
+  if (lateReports.length === 0) return;
+  // 取り消せない操作の結果。誤って触れただけで消さない。
+  if (!confirm(`${lateReportText()}\n\nこの内容を消します。控えましたか?`)) return;
+  lateReports = [];
+  saveLateReports();
+  renderLateReports();
+}
+
+function saveLateReports() {
+  try {
+    if (lateReports.length > 0) localStorage.setItem(LATE_KEY, JSON.stringify(lateReports));
+    else localStorage.removeItem(LATE_KEY);
+  } catch { /* プライベートブラウズなどでは保存できない */ }
+}
+
+function loadLateReports() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LATE_KEY) ?? "[]");
+    if (!Array.isArray(saved)) return;
+    lateReports = saved
+      .map((r) => (typeof r === "string" ? { text: r, important: true } : r))
+      .filter((r) => r && typeof r.text === "string");
+  } catch { /* 読めなければ何も持ち越さない */ }
 }
 
 /**

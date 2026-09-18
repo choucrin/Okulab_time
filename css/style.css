@@ -492,6 +492,8 @@ button:focus-visible {
 
 .notice {
   font-size: 0.84rem;
+  /* 持ち越した知らせは 1 件ずつ行を分けて示す */
+  white-space: pre-wrap;
   margin: 0;
   padding: 12px 14px;
   border-radius: var(--radius);
