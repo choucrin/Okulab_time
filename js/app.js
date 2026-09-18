@@ -323,6 +323,11 @@ function noteParticipantFailure(code, uncertain = false) {
   else participantFailures += 1;
   console.warn(`[okulab-time] 被験者用画面での操作を記録できませんでした(${code})`);
 
+  setConnError("participant", participantFailureText());
+}
+
+/** 被験者用画面で取りこぼした押下の内訳(何も無ければ "") */
+function participantFailureText() {
   let text = "";
   if (participantFailures > 0) {
     text += `被験者用画面での操作を ${participantFailures} 件記録できませんでした。` +
@@ -332,7 +337,7 @@ function noteParticipantFailure(code, uncertain = false) {
     text += `被験者用画面での操作 ${participantUnknown} 件は、` +
             "記録できたかどうか確認できませんでした。";
   }
-  setConnError("participant", text + "記録一覧を確認してください。");
+  return text ? text + "記録一覧を確認してください。" : "";
 }
 
 /**
@@ -777,6 +782,11 @@ function leaveRoom() {
   if (deleteReports.length > 0) {
     reportLate("退出したルームについて。" + deleteReportText(), state.roomId, 2);
   }
+
+  // 被験者の押下を取りこぼした件数も、この欄にしか残っていない。
+  // 押した瞬間は取り戻せないので、退出で黙って捨てない。
+  const missed = participantFailureText();
+  if (missed) reportLate("退出したルームについて。" + missed, state.roomId, 2);
 
   teardownRoom();
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
