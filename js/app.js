@@ -1192,7 +1192,11 @@ async function onRecordClick(event) {
   // 一括削除・書き出しと重ねない。重ねると、まとめ送りが数える件数と
   // 実際に消えた件数が食い違う。
   if (recordsInFlight > 0 || !state.roomId) return;
-  if (!confirm("この記録を削除します。よろしいですか?")) return;
+  if (!confirm(
+    "この記録を削除します。元に戻せません。\n\n" +
+    csvWarnings(state.roomId, [{ id }]) +
+    "よろしいですか?"
+  )) return;
 
   // 送信中に退出されても、別のルームの記録を消したり
   // 別のルームの画面に書き込んだりしない
@@ -1393,7 +1397,7 @@ async function onClearAll() {
     if (!confirm(
       `このルームの記録 ${refs.length} 件をすべて削除します。\n` +
       "削除した記録は元に戻せません。\n\n" +
-      "必要な記録は、先に CSV 書き出しで保存してください。\n\n" +
+      csvWarnings(room, refs) +
       "続けますか?"
     )) return;
 
@@ -1490,6 +1494,48 @@ const CSV_HEADER = [
   "started_by", "ended_by",
 ];
 
+/**
+ * 書き出しに含めた記録の id を、ルームごとに控える。
+ *
+ * 件数で比べると、削除で減った分と新しく増えた分が相殺され、
+ * 未保存の記録を見落とす。含まれているかどうかは id でしか判定できない。
+ * ルームごとに持たないと、別のルームで書き出した時点で前のルームの
+ * 「まだ書き出していない」が忘れられる。
+ *
+ * 再読み込みでは失われるが、その場合は「まだ書き出していない」扱いに
+ * なるだけで、警告が減ることはない。だから保存はしない。
+ * @type {Map<string, Set<string>>}
+ */
+const csvSaved = new Map();
+
+/**
+ * 取り消せない削除の前に出す、書き出しについての注意。
+ *
+ * 当てはまるものはすべて並べる。1 つに絞ると、あとから当たるものが
+ * 隠れる(「保存できたか確認できない」に隠れて「まだ書き出していない
+ * 記録がある」が出ない、など)。
+ *
+ * @param {{ id: string }[]} targets 消そうとしている記録
+ * @returns {string} 末尾の空行まで含む文面。出すものが無ければ空
+ */
+function csvWarnings(room, targets) {
+  const saved = csvSaved.get(room);
+  const missing = saved ? targets.filter((t) => !saved.has(t.id)).length : targets.length;
+  const lines = [];
+
+  if (!saved) lines.push("このルームでは、まだ CSV 書き出しをしていません。");
+  else if (missing > 0) {
+    lines.push(targets.length === 1
+      ? "この記録は、まだ CSV に書き出していません。"
+      : `削除する ${targets.length} 件のうち ${missing} 件は、まだ CSV に書き出していません。`);
+  }
+  if (missing > 0) lines.push("必要な記録は、先に CSV 書き出しで保存してください。");
+  // 共有シートもダウンロードも、保存されたかどうかを返さない(saveFile 参照)
+  if (saved) lines.push("書き出したファイルが実際に保存されたかどうかは確認できません。手元のファイルを確かめてください。");
+
+  return lines.length > 0 ? lines.join("\n") + "\n\n" : "";
+}
+
 async function exportCsv() {
   if (recordsInFlight > 0 || !state.roomId) return;
   // 読み込み中に退出されても、書き出し先は操作した時点のルームに固定する
@@ -1532,6 +1578,14 @@ async function exportCsv() {
     // 退出していても、控えたルームの内容で書き出しは最後まで行う。
     // 触らないのは画面の表示だけ(いまは別のルームのもの)。
     const saved = await saveFile(name, text);
+
+    if (saved !== "cancelled") {
+      // 取り消されていなければファイルは作られている。保存先まで確かめる
+      // 手立ては無いので、「書き出しに含めた」ことだけを控える。
+      const done = csvSaved.get(room) ?? new Set();
+      for (const s2 of rows) done.add(s2.id);
+      csvSaved.set(room, done);
+    }
 
     if (!here()) {
       // 退出後に終わった。取り消された場合は、記録がまだ手元に無いことを
@@ -1859,10 +1913,10 @@ function lateReportText() {
 }
 
 /**
- * 持ち越している知らせを、参加画面と実験者用画面の両方に出す。
+ * 持ち越している知らせを、被験者に見えない画面すべてに出す。
  *
- * 件数はここにしか残らない。参加画面にいる間は実験者用画面の欄が
- * 隠れているため、両方に出さないと読む機会が無いまま消える。
+ * 件数はここにしか残らない。表示中の画面以外の欄は隠れているため、
+ * 設定・参加・実験者用のどこで止まっても読めるようにしておく。
  */
 function renderLateReports() {
   const shown = lateReportText();
