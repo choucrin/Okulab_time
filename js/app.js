@@ -1032,6 +1032,7 @@ function renderRecords() {
       button.title = "この記録を削除";
       button.setAttribute("aria-label", "この記録を削除");
       button.textContent = "×";
+      button.disabled = recordsInFlight > 0;
       td.append(button);
     }
     tr.append(td);
@@ -1324,8 +1325,12 @@ function finishRecordsWork(token) {
  */
 function syncRecordsButtons() {
   const working = recordsInFlight > 0;
+  // 見た目と、押したときの判定を必ず一致させる。押せるのに何も起きない
+  // ボタンは、操作の取りこぼしと区別がつかない。
   el.btnCsv.disabled = working;
   el.btnClear.disabled = working || state.busy;
+  // 行ごとの削除も止める(再描画のたびに作り直されるため、ここでも当てる)
+  for (const button of el.recordBody.querySelectorAll("button.del")) button.disabled = working;
 }
 
 /**

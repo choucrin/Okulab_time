@@ -320,10 +320,8 @@ function declaredNames(code) {
 
   // 宣言は初期値の中にも入れ子になるため、本体をまとめて読まずに
   // キーワードの位置だけを拾い、そこから文の区切りまでを個別に見る。
-  // for (const x of LIST) の LIST は束縛ではないので of / in の手前まで。
   for (const m of code.matchAll(/\b(?:const|let|var)\s+/g)) {
-    const body = statementBody(code.slice(m.index + m[0].length));
-    addBindings(body.replace(/\b(?:of|in)\b[\s\S]*$/, ""), { stopAtNewline: true });
+    addBindings(statementBody(code.slice(m.index + m[0].length)), { stopAtNewline: true });
   }
 
   for (const m of code.matchAll(/\bclass\s+([A-Za-z_$][\w$]*)/g)) names.add(m[1]);
@@ -466,6 +464,10 @@ function classBodyRanges(code) {
  * セミコロンを省いた宣言(let x → 改行 → FOO = 2)で、次の文まで
  * 束縛として取り込まないために必要(仮引数では改行は文の区切りに
  * ならないので指定しない)。
+ *
+ * for (const x of LIST) の LIST も束縛ではないので、束縛を書いている
+ * 位置に現れた of / in で打ち切る。初期値の中の in(("k" in obj) など)で
+ * 切ってしまうと、後ろの宣言を取りこぼす。
  */
 function bindingTargets(text, { stopAtNewline = false } = {}) {
   const targets = [];
@@ -491,7 +493,14 @@ function bindingTargets(text, { stopAtNewline = false } = {}) {
     if (valueDepth === null) {
       if (c === "=") valueDepth = depth;
       else if (c === "," && depth === 0) { targets.push(target); target = ""; }
-      else target += c;
+      else {
+        target += c;
+        // 束縛を書いている位置の of / in は、for 文の反復対象へ移る合図
+        if (depth === 0 && /\s(?:of|in)\s$/.test(target)) {
+          target = target.replace(/\s(?:of|in)\s$/, "");
+          break;
+        }
+      }
     } else if (c === "," && depth === valueDepth) {
       valueDepth = null;                          // 次の束縛へ
       if (depth === 0) { targets.push(target); target = ""; }
