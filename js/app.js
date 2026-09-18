@@ -21,6 +21,8 @@ const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
 const LATE_KEY = "okulab-time/late";       // 退出後に終わった操作の結果(再読み込みでも失わない)
 const MAX_LATE_REPORTS = 20;               // 持ち越す知らせの上限
+// 削除の件数は画面にしか残らない。再読み込みを促す文言より前に出す。
+const RELOAD_WARNING = "【この件数は再読み込みすると消えます。先に控えてください。】";
 const ROLE_LABEL = { start: "計測開始 担当", end: "計測終了 担当", view: "閲覧のみ" };
 const PRESS_FRESH_MS = 15000;   // pointerdown で拾った時刻を有効とみなす猶予
 const MAX_SEND_ATTEMPTS = 5;
@@ -708,11 +710,14 @@ function onLeave() {
       "(すでにサーバーに届いていた場合、その操作は記録として残ります)"
     : "このルームから退出します。よろしいですか?";
 
-  // 未解決の削除の件数は、退出でこの欄から消える。
-  // 決める前に、その場で見せる(退出後も持ち越しはするが、
-  // 画面の外へ移る前に読む機会を必ず作る)。
+  // 未解決の削除の件数は持ち越すが、添えられた知らせは消える。
+  // どちらも、決める前にその場で見せる。
   const report = deleteReportText();
-  const message = report ? `${report}\n\n― この内容は退出すると消えます。―\n\n${warning}` : warning;
+  const shown = [
+    report ? `${report}\n― この内容は持ち越します ―` : "",
+    noticeText ? `${noticeText}\n― この内容は退出すると消えます ―` : "",
+  ].filter(Boolean).join("\n\n");
+  const message = shown ? `${shown}\n\n${warning}` : warning;
 
   if (!confirm(message)) return;
   leaveRoom();
@@ -735,7 +740,10 @@ function teardownRoom() {
 function leaveRoom() {
   // 退出でエラー欄は消える。未解決の件数はここにしか残らないので、
   // 持ち越す知らせへ移してから消す(そちらは保存され、参加画面にも出る)。
-  for (const r of deleteReports) reportLate("退出したルームについて。" + r.text, null, 2);
+  // 1 件ずつ積むと上限を食いつぶすため、まとめて 1 つにする。
+  if (deleteReports.length > 0) {
+    reportLate("退出したルームについて。" + deleteReportText(), state.roomId, 2);
+  }
 
   teardownRoom();
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
@@ -1077,7 +1085,8 @@ async function onStart(press) {
       () => startSession(db, room, payload, sessionId),
       () => epoch !== roomEpoch
     );
-    if (epoch !== roomEpoch) return;   // 既に別のルームにいる
+    // 既に別のルームにいる。画面は触らないが、結果は伝える
+    if (epoch !== roomEpoch) return reportLateResult("計測開始", result, room);
     if (!result.ok) return handleCode(result.code);
 
     if (result.duplicate && result.status && result.status !== "running") {
@@ -1106,7 +1115,7 @@ async function onEnd(press) {
       () => endSession(db, room, payload, expectedId),
       () => epoch !== roomEpoch
     );
-    if (epoch !== roomEpoch) return;
+    if (epoch !== roomEpoch) return reportLateResult("計測終了", result, room);
     if (result.ok) {
       applyCurrent(null);   // 購読の到着を待たずに待機中へ戻す
       toast(`計測終了 — ${formatSeconds(result.durationMs)} 秒` + (result.duplicate ? "(再送を確認)" : ""));
@@ -1145,7 +1154,7 @@ async function onAbort() {
       () => abortSession(db, room, { uid, expectedId }),
       () => epoch !== roomEpoch
     );
-    if (epoch !== roomEpoch) return;
+    if (epoch !== roomEpoch) return reportLateResult("計測の中止", result, room);
     state.abortHint = false;
     if (result.ok) {
       applyCurrent(null);
@@ -1186,7 +1195,7 @@ async function onRecordClick(event) {
       ? `${handle}は、削除できたかどうか確認できませんでした` +
         `(あとから削除される場合があります)。${reasonForReport(err)}` +
         "記録一覧で結果を確かめてください。"
-      : `${handle}を削除できませんでした。${reasonForReport(err)}`;
+      : `${handle}を削除できませんでした。${reasonBesideReport(err)}`;
 
     // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
     if (epoch !== roomEpoch) return reportLate("退出したルームについて。" + text, room, uncertain ? 2 : 1);
@@ -1341,7 +1350,7 @@ async function onClearAll() {
     // 対象を数える段階での失敗。まだ何も送っていないので、
     // 「中断した」と伝えると消えたかどうかを疑わせてしまう。
     if (!started) {
-      const text = "削除する記録を数えられませんでした。" + reasonForReport(err);
+      const text = "削除する記録を数えられませんでした。" + reasonBesideReport(err);
       if (epoch === roomEpoch) notice(text, "clear");
       else reportLate("退出したルームについて。" + text, room);   // 黙って終わらせない
       return;
@@ -1367,11 +1376,6 @@ async function onClearAll() {
     // 一覧を見比べたときに数が合うよう、最初から対象外の分も伝える
     const kept = (skipped > 0 ? `進行中の ${skipped} 件は最初から対象外です。` : "") +
       (deleted > 0 || pending > 0 ? "記録一覧で結果を確かめてください。" : "");
-    // この件数は画面にしか残らない。再読み込みを促す文言より前に出す。
-    const advice = deleted > 0 || pending > 0
-      ? "【この件数は再読み込みすると消えます。先に控えてください。】"
-      : "";
-
     const body = done + reasonForReport(err) + unknown + left + kept;
 
     // ルームを離れたあとに終わった場合、エラー欄はもう別のルームのもの。
@@ -1381,14 +1385,13 @@ async function onClearAll() {
       return reportLate("退出したルームについて。" + body, room, 2);
     }
 
-    const report = advice + body;
     if (deleted > 0 || pending > 0) {
       // 新しい内訳のほうが確かなので、こちらを控えとして残す
-      keepDeleteReport("clear", report);
+      keepDeleteReport("clear", body);
     } else {
       // 今回は何も送れていない。前回の「確認できなかった件数」は
       // まだ有効なので、消さずに後ろへ添える。
-      notice(report, "clear");
+      notice(body, "clear");
     }
   } finally {
     // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)
@@ -1459,7 +1462,7 @@ async function exportCsv() {
     clearNotice("csv");   // 前回の失敗の表示を残さない
     toast(`${rows.length} 件を書き出しました`);
   } catch (err) {
-    const failure = "CSV 書き出しに失敗しました。" + reasonForReport(err);
+    const failure = "CSV 書き出しに失敗しました。" + reasonBesideReport(err);
     // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
     if (!here()) return reportLate("退出したルームの" + failure, room, 1);
     notice(failure, "csv");
@@ -1596,9 +1599,12 @@ function showError(node, message) {
  */
 function renderActionError() {
   const report = deleteReportText();
-  const text = report && noticeText
-    ? `${report}(続けて: ${noticeText})`
-    : report || noticeText;
+  // 注意は表示するときだけ付ける。控えに含めると、持ち越した知らせ
+  // (保存され、再読み込みでも残る)にまで付いて事実に反する。
+  const shown = report ? RELOAD_WARNING + report : "";
+  const text = shown && noticeText
+    ? `${shown}(続けて: ${noticeText})`
+    : shown || noticeText;
 
   el.btnDismissReport.hidden = report === "";
   if (!text) {
@@ -1718,6 +1724,23 @@ function reportLate(message, room, rank = 0) {
 
   saveLateReports();
   renderLateReports();
+}
+
+/**
+ * 退出後に終わった計測操作の結果を伝える。
+ *
+ * 押した瞬間は取り戻せない。成功なら記録一覧で確かめられるが、
+ * 失敗はどこにも残らないため、必ず知らせる(とくに終了の失敗は、
+ * その計測が進行中のまま残ることを意味する)。
+ */
+function reportLateResult(what, result, room) {
+  if (result.ok) {
+    reportLate(`退出したルームで${what}の送信が完了しました。`, room, 0);
+    return;
+  }
+  // 世代の照合で取り消した場合は、送っていないので伝えることがない
+  if (result.code === "CANCELLED") return;
+  reportLate(`退出したルームで${what}を記録できませんでした。${describeCode(result.code)}`, room, 2);
 }
 
 /** 持ち越している知らせをひとつなぎにしたもの */
@@ -1867,4 +1890,14 @@ function describeError(err) {
 function reasonForReport(err) {
   return describeError(err)
     .replace(/(^|。)(?:ページを再読み込みしてください|もう一度お試しください)。/g, "$1");
+}
+
+/**
+ * 件数と同じ欄に並ぶときだけ、案内を外した文言にする。
+ *
+ * 外すのは「その場で従うと件数が消える」ためであり、件数が無いときは
+ * 対処の手立てを削るだけになる(取り消し・ログイン切れなど)。
+ */
+function reasonBesideReport(err) {
+  return deleteReports.length > 0 ? reasonForReport(err) : describeError(err);
 }
