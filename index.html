@@ -81,7 +81,9 @@
 
       <button type="submit" class="btn btn--primary" id="btn-join">この端末を参加させる</button>
       <p id="join-error" class="error" role="alert" hidden></p>
-      <p class="error" role="status" data-late-report hidden></p>
+      <!-- 持ち越した知らせは参加の失敗ではない。隣の赤い欄と同じ見た目に
+           すると、入室できなかった理由と読み違える -->
+      <p class="notice notice--warn" role="status" data-late-report hidden></p>
       <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
         上の内容を消す
       </button>
