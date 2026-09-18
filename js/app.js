@@ -129,7 +129,6 @@ let lastResubscribe = 0;
 let participantFailures = 0;    // 被験者用画面で記録できなかった操作の数
 let recordsInFlight = 0;        // 走っている記録操作(書き出し・削除)の数
 let recordsOwner = 0;           // その操作の通し番号(後始末の横取りを防ぐ)
-let clearHoldsBusy = false;     // 一括削除が走っている(計測の送信とは別に数える)
 const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
 const connErrors = new Map();        // 購読ごとの接続エラー
 
@@ -709,9 +708,18 @@ function watch(subscribe, onData, key) {
 }
 
 function onLeave() {
-  const warning = (state.busy || recordsInFlight > 0)
-    ? "処理中の操作があります。中断してこのルームから退出しますか?\n" +
-      "(すでにサーバーに届いていた場合、その操作は記録として残ります)"
+  // 何が中断され、何が最後まで走るのかを取り違えさせない
+  const notes = [];
+  if (state.busy) {
+    notes.push("計測の送信は取りやめます(すでにサーバーに届いていた場合は記録として残ります)");
+  }
+  if (recordsInFlight > 0) {
+    notes.push("記録の書き出し・削除は最後まで行い、結果はその場でお知らせします");
+  }
+
+  const warning = notes.length > 0
+    ? "処理中の操作があります。このまま退出しますか?\n" +
+      notes.map((n) => `・${n}`).join("\n")
     : "このルームから退出します。よろしいですか?";
 
   // 未解決の削除の件数は持ち越すが、添えられた知らせは消える。
@@ -759,7 +767,6 @@ function leaveRoom() {
   state.sessionsLoaded = false;
   state.currentLoaded = false;
   state.busy = false;
-  clearHoldsBusy = false;
   state.sending = false;
   state.abortHint = false;
   state.showMissing = false;
@@ -1175,6 +1182,9 @@ async function onRecordClick(event) {
   const button = event.target.closest("button.del");
   if (!button) return;
   const id = button.dataset.id;
+  // 一括削除・書き出しと重ねない。重ねると、まとめ送りが数える件数と
+  // 実際に消えた件数が食い違う。
+  if (recordsInFlight > 0 || !state.roomId) return;
   if (!confirm("この記録を削除します。よろしいですか?")) return;
 
   // 送信中に退出されても、別のルームの記録を消したり
@@ -1184,6 +1194,9 @@ async function onRecordClick(event) {
   // どの記録だったかは、消えたあとでは分からなくなる。先に控える。
   const target = state.sessions.find((s2) => s2.id === id);
   const handle = target ? `${formatClock(target.startMs)} 開始の記録` : "この記録";
+  // 記録操作として数える。数えないと、この削除の最中に書き出しや一括削除を
+  // 始められてしまい、退出の警告にも出ない(取り消せない操作なのに)。
+  const token = startRecordsWork();
 
   try {
     await deleteSession(db, room, id);
@@ -1209,6 +1222,8 @@ async function onRecordClick(event) {
     // 結果不明を伝える文言は、計測操作では消さない
     if (uncertain) keepDeleteReport("row", text, id);
     else notice(text, "row", id);
+  } finally {
+    finishRecordsWork(token);
   }
 }
 
@@ -1290,17 +1305,13 @@ function startRecordsWork() {
   return ++recordsOwner;
 }
 
-/**
- * 後始末する。すでに次の操作が始まっていれば、その操作に任せる。
- * 一括削除の印を戻すかどうかは呼び出し側が決める。
- */
-function finishRecordsWork(token, releaseClear = false) {
+/** 後始末する。すでに次の操作が始まっていれば、その操作に任せる。 */
+function finishRecordsWork(token) {
   recordsInFlight = Math.max(recordsInFlight - 1, 0);
   if (recordsInFlight === 0) resetRecordsLabels();
   syncRecordsButtons();
 
   if (recordsOwner !== token) return;   // すでに次の操作が状態を握っている
-  if (releaseClear) clearHoldsBusy = false;
   renderControls();
 }
 
@@ -1314,7 +1325,7 @@ function finishRecordsWork(token, releaseClear = false) {
 function syncRecordsButtons() {
   const working = recordsInFlight > 0;
   el.btnCsv.disabled = working;
-  el.btnClear.disabled = working || state.busy || clearHoldsBusy;
+  el.btnClear.disabled = working || state.busy;
 }
 
 /**
@@ -1334,17 +1345,17 @@ function resetRecordsLabels() {
 async function onClearAll() {
   // 入室でボタンの表示は戻るが、前のルームの操作がまだ走っていることがある。
   // 全件を読む操作どうしを重ねると、欠けた CSV が「成功」として出る(9-02)。
-  if (recordsInFlight > 0 || state.busy || clearHoldsBusy || !state.roomId) return;
+  if (recordsInFlight > 0 || state.busy || !state.roomId) return;
 
   const room = state.roomId;
   const epoch = roomEpoch;
 
   const token = startRecordsWork();
   el.btnClear.textContent = "確認中…";
-  // 計測操作は止めない。一括削除は数え上げと確定で 30 秒を超えることがあり、
-  // その間に被験者が終了を押すと、押した瞬間そのものが失われる。
-  // 削除の対象は開始前に数え終えているため、計測と重なっても影響しない。
-  clearHoldsBusy = true;
+  // 計測操作は止めない(state.busy を立てない)。一括削除は数え上げと
+  // 確定で 30 秒を超えることがあり、その間に被験者が終了を押すと、
+  // 押した瞬間そのものが失われる。削除の対象は開始前に数え終えている
+  // ため、計測と重なっても影響しない。
   renderControls();
 
   let total = 0;                     // 失敗時の内訳を出すため catch からも見る
@@ -1449,7 +1460,7 @@ async function onClearAll() {
   } finally {
     // 世代が変わっていてもボタンは必ず戻す(戻さないと次のルームで操作できなくなる)。
     // ただし、あとから終わった古い操作が今の操作の状態を戻さないようにする。
-    finishRecordsWork(token, true);
+    finishRecordsWork(token);
   }
 }
 
@@ -1509,10 +1520,25 @@ async function exportCsv() {
     const name = `okulab-time_${room.slice(0, 6)}_${stamp()}.csv`;
     // 退出していても、控えたルームの内容で書き出しは最後まで行う。
     // 触らないのは画面の表示だけ(いまは別のルームのもの)。
-    await saveFile(name, text);
-    if (!here()) return reportLate(`退出したルームの記録 ${rows.length} 件を書き出しました。`, room);
+    const saved = await saveFile(name, text);
+
+    if (!here()) {
+      // 退出後に終わった。取り消された場合は、記録がまだ手元に無いことを
+      // 必ず伝える(黙って終わると、保存できた前提で削除に進んでしまう)。
+      return reportLate(saved === "cancelled"
+        ? "退出したルームの CSV 書き出しは保存が取り消されました。記録はまだ保存されていません。"
+        : `退出したルームの記録 ${rows.length} 件を書き出しました。`,
+        room, saved === "cancelled" ? 1 : 0);
+    }
+
     clearNotice("csv");   // 前回の失敗の表示を残さない
-    toast(`${rows.length} 件を書き出しました`);
+    // 取り消した場合に「書き出しました」と伝えると、保存できた前提で
+    // 一括削除に進んでしまう。取り消しは取り消しとして伝える。
+    if (saved === "cancelled") {
+      notice("書き出しを取り消しました。記録はまだ保存されていません。", "csv");
+    } else {
+      toast(`${rows.length} 件を書き出しました(保存先を確かめてください)`);
+    }
   } catch (err) {
     const failure = "CSV 書き出しに失敗しました。" + reasonBesideReport(err);
     // 退出後はエラー欄が別のルームのものになる。黙って終わらせない。
@@ -1527,6 +1553,12 @@ async function exportCsv() {
  * ホーム画面に追加した状態(standalone)の iOS では <a download> が
  * 無反応になることがあるため、共有シート経由の保存を先に試す。
  */
+/**
+ * @returns {Promise<"cancelled"|"unknown">}
+ *   取り消されたことだけは分かる。それ以外は、手元に取り出せる
+ *   ファイルが残ったかどうかをブラウザから知る手段がないため
+ *   "unknown" を返す(「保存できた」と言い切らない)。
+ */
 async function saveFile(filename, text) {
   const file = new File([text], filename, { type: "text/csv" });
   const standalone =
@@ -1536,9 +1568,12 @@ async function saveFile(filename, text) {
   if (standalone && navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: filename });
-      return;
+      // 共有先に渡ったことは分かるが、取り出せるファイルとして残ったかは
+      // 分からない(クリップボードや、受け取りを断られた送信でも解決する)
+      return "unknown";
     } catch (err) {
-      if (err?.name === "AbortError") return; // 利用者が共有シートを閉じた
+      // 利用者が共有シートを閉じた。保存はされていない
+      if (err?.name === "AbortError") return "cancelled";
       // それ以外は通常のダウンロードにフォールバック
     }
   }
@@ -1552,6 +1587,8 @@ async function saveFile(filename, text) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+  // ブラウザに渡すところまで。保存先の選択を取り消されても分からない。
+  return "unknown";
 }
 
 function csv(value) {
