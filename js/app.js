@@ -1656,8 +1656,7 @@ async function exportCsv() {
 /**
  * ホーム画面に追加した状態(standalone)の iOS では <a download> が
  * 無反応になることがあるため、共有シート経由の保存を先に試す。
- */
-/**
+ *
  * @returns {Promise<"cancelled"|"unknown">}
  *   取り消されたことだけは分かる。それ以外は、手元に取り出せる
  *   ファイルが残ったかどうかをブラウザから知る手段がないため
