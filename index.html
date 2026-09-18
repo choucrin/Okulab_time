@@ -25,6 +25,13 @@
     <p><code>js/firebase-config.js</code> を開き、Firebase コンソールで発行した設定値に書き換えてください。</p>
     <p class="muted">手順は README.md の「セットアップ」を参照してください。</p>
     <p id="config-detail" class="muted mono"></p>
+
+    <!-- 退出したあとに終わった操作の結果。ここで起動が止まる場合こそ、
+         前回の「消えたか分からない」を読む機会が要る -->
+    <p class="notice notice--warn" role="status" data-late-report hidden></p>
+    <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
+      上の内容を消す
+    </button>
   </div>
 </section>
 
@@ -74,8 +81,8 @@
 
       <button type="submit" class="btn btn--primary" id="btn-join">この端末を参加させる</button>
       <p id="join-error" class="error" role="alert" hidden></p>
-      <p id="late-report" class="error" role="status" hidden></p>
-      <button type="button" class="btn btn--ghost btn--sm" id="btn-dismiss-late" hidden>
+      <p class="error" role="status" data-late-report hidden></p>
+      <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
         上の内容を消す
       </button>
     </form>
@@ -152,8 +159,8 @@
     <!-- 退出したあとに終わった操作の結果(参加画面にも同じものを出す)。
          あとから現れるため、大きな計測ボタンより下に置く。上に出すと
          実験中にボタンが動き、押し間違いを招く -->
-    <p id="late-report-main" class="notice notice--warn" role="status" hidden></p>
-    <button type="button" class="btn btn--ghost btn--sm" id="btn-dismiss-late-main" hidden>
+    <p class="notice notice--warn" role="status" data-late-report hidden></p>
+    <button type="button" class="btn btn--ghost btn--sm" data-dismiss-late hidden>
       上の内容を消す
     </button>
 

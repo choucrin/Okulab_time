@@ -76,10 +76,10 @@ const el = {
   endSub:        $("end-sub"),
   actionError:   $("action-error"),
   btnDismissReport: $("btn-dismiss-report"),
-  lateReport:        $("late-report"),
-  lateReportMain:    $("late-report-main"),
-  btnDismissLate:     $("btn-dismiss-late"),
-  btnDismissLateMain: $("btn-dismiss-late-main"),
+  // 持ち越した知らせは複数の画面に同じものを出す。画面が増えても
+  // 配線を増やさずに済むよう、id ではなく印で拾う。
+  lateReports:     document.querySelectorAll("[data-late-report]"),
+  lateDismissals:  document.querySelectorAll("[data-dismiss-late]"),
   recordCount:   $("record-count"),
   recordBody:    $("record-body"),
   recordEmpty:   $("record-empty"),
@@ -155,8 +155,9 @@ function main() {
   // 設定不備や初期化の失敗でも消えないようにする(そこで止まるときこそ、
   // 前回の「消えたか分からない」を読む機会が要る)。
   // 消す手立ても同時に配線する。押せるのに効かないボタンは出さない。
-  el.btnDismissLate.addEventListener("click", dismissLateReports);
-  el.btnDismissLateMain.addEventListener("click", dismissLateReports);
+  for (const button of el.lateDismissals) {
+    button.addEventListener("click", dismissLateReports);
+  }
   loadLateReports();
   renderLateReports();
 
@@ -1865,12 +1866,11 @@ function lateReportText() {
  */
 function renderLateReports() {
   const shown = lateReportText();
-  for (const node of [el.lateReport, el.lateReportMain]) {
+  for (const node of el.lateReports) {
     node.textContent = shown;
     node.hidden = shown === "";
   }
-  el.btnDismissLate.hidden = shown === "";
-  el.btnDismissLateMain.hidden = shown === "";
+  for (const button of el.lateDismissals) button.hidden = shown === "";
 }
 
 /** 読み終えた知らせを消す */
