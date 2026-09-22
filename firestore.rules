@@ -53,9 +53,10 @@ service cloud.firestore {
       }
 
       // 固定上限の各要素を検証する。旧版の tags 未送信も許可する。
+      // 名前中の区切り文字等は %HH で保存するため、最大 (40 * 3) * 2 + 1 文字。
       function validTagAt(tags, i) {
         return tags.size() <= i || (tags[i] is string
-            && tags[i].size() >= 3 && tags[i].size() <= 81
+            && tags[i].size() >= 3 && tags[i].size() <= 241
             && tags[i].matches('.+:.+'));
       }
 

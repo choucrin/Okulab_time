@@ -19,6 +19,7 @@ export const APP_VERSION = "v.02.2";
 
 const CATALOG_KEY = "okulab-time/catalog";
 let catalog = [];
+let catalogSnapshot = null;
 const selectedTags = new Set();
 
 const STORAGE_KEY = "okulab-time/session";
@@ -2117,9 +2118,16 @@ function catalogName(value) {
   return name;
 }
 
-function initCatalog() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(CATALOG_KEY) ?? "[]");
+// 区切り文字とエスケープ記号を符号化し、通常の「ジャンル:内容」は維持する。
+// CSV のタグ区切りと改行も符号化する。過去の保存文字列は変換しない。
+function catalogTag(genre, item) {
+  const escape = (name) => name.replace(/[%:;\r\n]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
+  return `${escape(genre)}:${escape(item)}`;
+}
+
+function readCatalog(raw) {
+    const saved = JSON.parse(raw ?? "[]");
     if (!Array.isArray(saved)) throw new Error();
     const names = new Set();
     for (const genre of saved) {
@@ -2132,15 +2140,21 @@ function initCatalog() {
         items.add(item);
       }
     }
-    catalog = saved;
+    return saved;
+}
+
+function initCatalog() {
+  try {
+    catalogSnapshot = localStorage.getItem(CATALOG_KEY);
+    catalog = readCatalog(catalogSnapshot);
   } catch {
     el.catalogMessage.textContent = "カタログを読み込めませんでした。保存領域を確認してください。登録済みデータの上書きを防ぐため、編集は停止しています。";
     el.catalogAdd.disabled = true;
     renderCatalog();
     return;
   }
-  el.catalogAdd.addEventListener("click", () => {
-    if (editCatalog((draft) => {
+  el.catalogAdd.addEventListener("click", async () => {
+    if (await editCatalog((draft) => {
       const name = catalogName(el.catalogGenre.value);
       if (draft.some((g) => g.name === name)) throw new Error("同じジャンルが登録されています。");
       draft.push({ name, items: [] });
@@ -2149,26 +2163,50 @@ function initCatalog() {
   renderCatalog();
 }
 
-function editCatalog(change) {
-  const draft = catalog.map((g) => ({ name: g.name, items: [...g.items] }));
-  try {
-    change(draft);
-  } catch (err) {
-    el.catalogMessage.textContent = err.message;
+async function editCatalog(change) {
+  // 読込・比較・保存を同一ロック内で行い、同時保存の隙間も防ぐ。
+  if (!navigator.locks?.request) {
+    el.catalogMessage.textContent = "安全に保存するための機能が利用できません。対応ブラウザでHTTPS接続して開き直してください。変更は反映していません。";
     return false;
   }
+  // 待機中に画面が更新された場合、古い画面の添字による操作も拒否する。
+  const expected = catalogSnapshot;
   try {
-    localStorage.setItem(CATALOG_KEY, JSON.stringify(draft));
+    return await navigator.locks.request(CATALOG_KEY, () => {
+      const current = localStorage.getItem(CATALOG_KEY);
+      if (current !== expected || catalogSnapshot !== expected) {
+        catalog = readCatalog(current);
+        catalogSnapshot = current;
+        pruneSelectedTags();
+        renderCatalog();
+        el.catalogMessage.textContent = "別の操作でカタログが更新されました。最新の内容を表示しました。確認してもう一度操作してください。";
+        return false;
+      }
+      const draft = catalog.map((g) => ({ name: g.name, items: [...g.items] }));
+      try {
+        change(draft);
+      } catch (err) {
+        el.catalogMessage.textContent = err.message;
+        return false;
+      }
+      const serialized = JSON.stringify(draft);
+      localStorage.setItem(CATALOG_KEY, serialized);
+      catalogSnapshot = serialized;
+      catalog = draft;
+      pruneSelectedTags();
+      el.catalogMessage.textContent = "カタログを保存しました。";
+      renderCatalog();
+      return true;
+    });
   } catch {
-    el.catalogMessage.textContent = "カタログを保存できませんでした。変更は反映していません。端末の保存領域を確認してください。";
+    el.catalogMessage.textContent = "カタログを読み込み・保存できませんでした。変更は反映していません。端末の保存領域を確認してください。";
     return false;
   }
-  catalog = draft;
-  const available = new Set(catalog.flatMap((g) => g.items.map((item) => `${g.name}:${item}`)));
+}
+
+function pruneSelectedTags() {
+  const available = new Set(catalog.flatMap((g) => g.items.map((item) => catalogTag(g.name, item))));
   for (const tag of selectedTags) if (!available.has(tag)) selectedTags.delete(tag);
-  el.catalogMessage.textContent = "カタログを保存しました。";
-  renderCatalog();
-  return true;
 }
 
 function catalogButton(text, action) {
@@ -2192,7 +2230,7 @@ function renderCatalog() {
     legend.textContent = genre.name;
     choices.append(legend);
     for (const item of genre.items) {
-      const tag = `${genre.name}:${item}`;
+      const tag = catalogTag(genre.name, item);
       const label = document.createElement("label");
       label.className = "catalog-choice";
       const input = document.createElement("input");
@@ -2207,10 +2245,6 @@ function renderCatalog() {
         if (input.checked) selectedTags.add(tag);
         else selectedTags.delete(tag);
         el.catalogMessage.textContent = `${selectedTags.size}個選択しています。`;
-        // コロンを含む名前どうしで同じ保存文字列になる場合も選択表示を揃える。
-        for (const box of el.catalogOptions.querySelectorAll("input")) {
-          box.checked = selectedTags.has(box.value);
-        }
       });
       input.value = tag;
       label.append(input, document.createTextNode(item));
