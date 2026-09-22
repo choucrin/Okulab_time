@@ -147,3 +147,8 @@ Development工程を完了しました。READMEの修正を保持し、A-9実機
 - 未検証: 実ブラウザでのカタログ操作・CSV保存・複数タブ操作
 - 未検証: Firebase上のルール評価・2端末同期（A-1/A-2）
 - 未検証: 更新候補のReview・Test。後続Test記録にも今回の実機確認の判断を残すよう引き継ぎを記録済み。
+
+
+## 既存レビュー文書の改名
+ユーザ指定により、既存のREVIEW.mdをRegacyReview.mdへ改名した。文書本文は変更せず、自動工程のReview.mdと区別する。HANDOFF.md・ProgressReport.md・RSD.mdの参照とtools/verify.jsの版数検査先を更新した。過去の工程記録にある旧名は当時の記録として保持する。
+改名後の検証: node tools/verify.jsは9項目成功、node --testは30件成功、git diff --check成功。旧レビュー本文と自動Review.md本文の保持、および追跡パスの大小文字衝突がないことを確認した。実ブラウザ・Firebase実環境・iPhone/iPad実機は引き続き未検証。

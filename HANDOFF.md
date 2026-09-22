@@ -5,7 +5,7 @@
 
 - 対象リポジトリ: https://github.com/choucrin/Okulab_time
 - 作業ブランチ: `claude/recording-end-validation-c7zblx`(`main` 未マージ)
-- 関連文書: [README.md](README.md)(構築・利用)/ [RSD.md](RSD.md)(要件)/ [REVIEW.md](REVIEW.md)(レビュー記録)/ [ProgressReport.md](ProgressReport.md)(開発ログ)
+- 関連文書: [README.md](README.md)(構築・利用)/ [RSD.md](RSD.md)(要件)/ [RegacyReview.md](RegacyReview.md)(レビュー記録)/ [ProgressReport.md](ProgressReport.md)(開発ログ)
 
 ---
 
@@ -82,7 +82,7 @@ await withTimeout(batch.commit(), COMMIT_TIMEOUT_MS);   // ← 未宣言
 ```
 
 混入したのは `6823612`(v.01.9)。「削除の確定に打ち切りがなく、通信が切れると
-無期限に固まる問題を修正」(REVIEW.md 9-03)として `withTimeout` を追加した際に、
+無期限に固まる問題を修正」(RegacyReview.md 9-03)として `withTimeout` を追加した際に、
 **定数の宣言だけが漏れた**。ES モジュールは strict mode なので、実行時に
 `ReferenceError` になる。
 
@@ -126,7 +126,7 @@ GitHub Actions も通ったうえで公開された。**この穴を塞ぐ検査
 | ③ | `describeError` が生の例外メッセージを露出する件 | **実施** |
 | ④ | `tools/verify.js` に未宣言識別子の検査を追加 | **実施** |
 | ⑤ | 一括削除の失敗表示の位置(`actionError`)を移す | **実施しない**(現状維持) |
-| 版 | バージョン表記 | **v.02.1 へ繰り上げ**。`ProgressReport.md` / `REVIEW.md` に記録も追記 |
+| 版 | バージョン表記 | **v.02.1 へ繰り上げ**。`ProgressReport.md` / `RegacyReview.md` に記録も追記 |
 
 ### 版を上げる際に必ず触るファイル
 
@@ -137,7 +137,7 @@ GitHub Actions も通ったうえで公開された。**この穴を塞ぐ検査
 2. `index.html` の `id="version"`
 3. `RSD.md` の「現行バージョン」行
 4. `ProgressReport.md` の「現行バージョン」行
-5. `REVIEW.md` の「現行バージョン」行
+5. `RegacyReview.md` の「現行バージョン」行
 
 ### Firebase 側の操作は不要
 
@@ -337,7 +337,7 @@ function reasonForReport(err) {
 **原則:** 「保存できた」と言い切れない場合は言い切らない。
 取り消せない操作の前には、**当てはまる警告をすべて**出す。
 
-### 5.4 全件を読む操作どうしを重ねない(REVIEW.md 9-02 の再発防止)
+### 5.4 全件を読む操作どうしを重ねない(RegacyReview.md 9-02 の再発防止)
 
 | 見つけた欠陥 | 採った方針 |
 |---|---|
@@ -462,7 +462,7 @@ git checkout js/store.js
 ### コミットメッセージ
 
 このリポジトリは日本語で、1 行目に要約、空行、本文に「何が問題で、なぜ直すのか」を書く。
-`REVIEW.md` の番号(`9-02` など)を参照して経緯をつなぐ慣習がある。
+`RegacyReview.md` の番号(`9-02` など)を参照して経緯をつなぐ慣習がある。
 
 末尾に付ける行:
 
@@ -477,20 +477,20 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 ### 済んでいること(このブランチ)
 
 1. 第 2 章の修正(`COMMIT_TIMEOUT_MS` の宣言)
-2. 第 3 章 ②③④ と版の繰り上げ(v.02.1)、`ProgressReport.md` / `REVIEW.md` への追記
+2. 第 3 章 ②③④ と版の繰り上げ(v.02.1)、`ProgressReport.md` / `RegacyReview.md` への追記
 3. 第 4 章の設計(`pending` / `isUncertain` / `userError` / `reasonForReport` /
    定数の宣言検査)
 4. 第 5 章のうち、エラー欄の 2 段構え、退出後の結果の通知と持ち越し、
    全非同期処理の世代照合、記録操作の所有権による後始末
 
 5. 第 5 章 5.3(書き出しの網羅判定、保存できたと言い切らない扱い)
-6. 継続レビューで見つかった 10-06〜10-10(`REVIEW.md` 参照)
+6. 継続レビューで見つかった 10-06〜10-10(`RegacyReview.md` 参照)
 
 ### 残っていること
 
 - レビューの継続(重大・重要な指摘が出なくなるまで繰り返す)
 
-### `REVIEW.md` に追記すべき内容(前のセッションで書いた内容の要点)
+### `RegacyReview.md` に追記すべき内容(前のセッションで書いた内容の要点)
 
 - **致命的 10-01:** 一括削除が必ず失敗し、記録は実際に消えているのに
   「失敗」として報告される(第 2 章)

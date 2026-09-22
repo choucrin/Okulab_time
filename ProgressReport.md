@@ -2,7 +2,7 @@
 
 - 現行バージョン: **v.02.2**
 - リポジトリ: https://github.com/choucrin/Okulab_time
-- 関連文書: [RSD.md](RSD.md)(要件定義)/ [REVIEW.md](REVIEW.md)(レビュー記録)/ [README.md](README.md)(構築・利用手順)
+- 関連文書: [RSD.md](RSD.md)(要件定義)/ [RegacyReview.md](RegacyReview.md)(レビュー記録)/ [README.md](README.md)(構築・利用手順)
 
 ---
 
@@ -108,7 +108,7 @@
 | 6 巡目レビュー | — | **致命的 0 件・重要 0 件。両モデルとも指摘なしで収束** |
 | 6 巡目修正 | v.01.2 | 軽微指摘(表示位置・文書の巡数表記)のみ反映 |
 
-検出した不具合の詳細は [REVIEW.md](REVIEW.md) に集約している。
+検出した不具合の詳細は [RegacyReview.md](RegacyReview.md) に集約している。
 
 ### 2026-08-10
 
