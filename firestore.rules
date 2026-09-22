@@ -52,15 +52,49 @@ service cloud.firestore {
         return request.resource.data;
       }
 
+      // 固定上限の各要素を検証する。旧版の tags 未送信も許可する。
+      // 名前中の区切り文字等は %HH で保存するため、最大 (40 * 3) * 2 + 1 文字。
+      function validTagAt(tags, i) {
+        return tags.size() <= i || (tags[i] is string
+            && tags[i].size() >= 3 && tags[i].size() <= 241
+            && tags[i].matches('.+:.+'));
+      }
+
+      function validTags(tags) {
+        return tags is list && tags.size() <= 20
+            && validTagAt(tags, 0)
+            && validTagAt(tags, 1)
+            && validTagAt(tags, 2)
+            && validTagAt(tags, 3)
+            && validTagAt(tags, 4)
+            && validTagAt(tags, 5)
+            && validTagAt(tags, 6)
+            && validTagAt(tags, 7)
+            && validTagAt(tags, 8)
+            && validTagAt(tags, 9)
+            && validTagAt(tags, 10)
+            && validTagAt(tags, 11)
+            && validTagAt(tags, 12)
+            && validTagAt(tags, 13)
+            && validTagAt(tags, 14)
+            && validTagAt(tags, 15)
+            && validTagAt(tags, 16)
+            && validTagAt(tags, 17)
+            && validTagAt(tags, 18)
+            && validTagAt(tags, 19)
+            ;
+      }
+
       function validCreate() {
         return incoming().status == 'running'
             && incoming().startMs is number
             && incoming().label is string
             && incoming().label.size() <= 200
+            && (!('tags' in incoming()) || validTags(incoming().tags))
             && incoming().startedBy == request.auth.uid
             && incoming().endMs == null
             && incoming().keys().hasOnly([
-                 'status', 'label',
+                 'status', 'label', 'tags',
                  'startMs', 'startRawMs', 'startOffsetMs', 'startAccuracyMs',
                  'startSynced', 'startedBy', 'startedAt',
                  'endMs', 'endRawMs', 'endOffsetMs', 'endAccuracyMs',

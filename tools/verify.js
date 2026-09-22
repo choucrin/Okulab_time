@@ -202,7 +202,7 @@ check("バージョン表記の一致", () => {
     "index.html": read("index.html").match(/id="version">([^<]+)</)?.[1],
     "RSD.md": read("RSD.md").match(/\|\s*現行バージョン\s*\|\s*(v\.[\d.]+)\s*\|/)?.[1],
     "ProgressReport.md": read("ProgressReport.md").match(/現行バージョン:\s*\*\*(v\.[\d.]+)\*\*/)?.[1],
-    "REVIEW.md": read("REVIEW.md").match(/現行バージョン:\s*\*\*(v\.[\d.]+)\*\*/)?.[1],
+    "RegacyReview.md": read("RegacyReview.md").match(/現行バージョン:\s*\*\*(v\.[\d.]+)\*\*/)?.[1],
   };
 
   for (const [file, version] of Object.entries(sources)) {

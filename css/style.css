@@ -580,7 +580,7 @@ button:focus-visible {
 .reading__text {
   margin: 0;
   width: 100%;
-  font-size: clamp(0.86rem, 3.5vw, 1.05rem);
+  font-size: clamp(1.03rem, 4.2vw, 1.26rem);
   line-height: 1.95;
   letter-spacing: .01em;
   color: var(--text);
@@ -601,7 +601,7 @@ button:focus-visible {
 @media (min-width: 720px) {
   .screen-participant { padding-left: max(calc(var(--safe-l) + 16px), 8vw);
                         padding-right: max(calc(var(--safe-r) + 16px), 8vw); }
-  .reading__text { font-size: clamp(1rem, 1.6vw, 1.25rem); line-height: 2.05; }
+  .reading__text { font-size: clamp(1.2rem, 1.92vw, 1.5rem); line-height: 2.05; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -615,3 +615,10 @@ button:focus-visible {
   .bigbtn__title { font-size: 2.6rem; }
   .label-cell { max-width: 24ch; }
 }
+
+.catalog { margin-block: 16px; overflow-wrap: anywhere; }
+.catalog fieldset { margin-block: 12px; min-width: 0; }
+.catalog-choice { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.catalog-choice input { width: 20px; height: 20px; flex: none; }
+.catalog .btn { margin: 4px; }
+.tags-cell { white-space: normal; min-width: 12ch; overflow-wrap: anywhere; }
