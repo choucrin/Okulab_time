@@ -1,6 +1,6 @@
 # 開発ログ — Okulab Time
 
-- 現行バージョン: **v.02.1**
+- 現行バージョン: **v.02.2**
 - リポジトリ: https://github.com/choucrin/Okulab_time
 - 関連文書: [RSD.md](RSD.md)(要件定義)/ [REVIEW.md](REVIEW.md)(レビュー記録)/ [README.md](README.md)(構築・利用手順)
 

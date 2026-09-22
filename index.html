@@ -135,6 +135,20 @@
                autocomplete="off" autocapitalize="off" spellcheck="false"
                placeholder="被験者名・条件名など">
       </label>
+      <section class="catalog" aria-label="選択式ラベル">
+        <p>選択式ラベル（任意・最大20個）</p>
+        <p>カタログはこの端末に保存され、すべてのルームで利用できます。</p>
+        <div id="catalog-options"></div>
+        <details>
+          <summary>ラベルカタログを編集</summary>
+          <div id="catalog-editor"></div>
+          <label class="field">新しいジャンル（40文字まで）
+            <input type="text" id="catalog-genre" maxlength="40">
+          </label>
+          <button type="button" class="btn" id="catalog-add">ジャンルを追加</button>
+        </details>
+        <p id="catalog-message" role="status"></p>
+      </section>
       <button type="button" class="bigbtn bigbtn--start" id="btn-start" disabled>
         <span class="bigbtn__title">計測開始</span>
         <span class="bigbtn__sub" id="start-sub">接続中…</span>
@@ -181,6 +195,7 @@
           <thead>
             <tr>
               <th scope="col">ラベル</th>
+              <th scope="col">選択式ラベル</th>
               <th scope="col">開始</th>
               <th scope="col">終了</th>
               <th scope="col" class="num">経過(秒)</th>
@@ -218,7 +233,7 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.02.1</p>
+<p class="version" id="version">v.02.2</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

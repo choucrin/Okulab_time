@@ -112,6 +112,7 @@ export function startSession(db, roomId, press, sessionId) {
     tx.set(ref, {
       status: "running",
       label: press.label ?? "",
+      tags: press.tags ?? [],
       startMs: press.at,
       startRawMs: press.rawAt,          // 補正前(端末の生の Date.now())
       startOffsetMs: press.offsetMs,

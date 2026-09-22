@@ -15,7 +15,11 @@ import {
   collectDeletable, deleteSessions, isUncertain, SESSION_LIMIT,
 } from "./store.js";
 
-export const APP_VERSION = "v.02.1";
+export const APP_VERSION = "v.02.2";
+
+const CATALOG_KEY = "okulab-time/catalog";
+let catalog = [];
+const selectedTags = new Set();
 
 const STORAGE_KEY = "okulab-time/session";
 const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
@@ -69,6 +73,11 @@ const el = {
   connError:     $("conn-error"),
   panelStart:    $("panel-start"),
   panelEnd:      $("panel-end"),
+  catalogOptions: $("catalog-options"),
+  catalogEditor: $("catalog-editor"),
+  catalogGenre: $("catalog-genre"),
+  catalogAdd: $("catalog-add"),
+  catalogMessage: $("catalog-message"),
   inputLabel:    $("input-label"),
   btnStart:      $("btn-start"),
   btnEnd:        $("btn-end"),
@@ -147,6 +156,7 @@ main();
 
 function main() {
   el.version.textContent = APP_VERSION;
+  initCatalog();
 
   window.addEventListener("unhandledrejection", (event) => {
     console.error("[okulab-time] 未処理のエラー:", event.reason);
@@ -399,21 +409,12 @@ function nextPassage() {
   el.passageText.parentElement.scrollTop = 0;   // 新しい文章は先頭から
 }
 
-/**
- * 文章が枠に収まるよう文字を少しだけ小さくする。
- * 読みづらくなっては本末転倒なので下限を決めておき、
- * それでも収まらない分は枠の中でスクロールしてもらう。
- */
+/** 拡大した文字サイズを維持し、溢れた文章は枠内でスクロールする。 */
 function fitPassage() {
-  const box = el.passageText.parentElement;
-  el.passageText.style.fontSize = "";               // いったん CSS の指定へ戻す
-  let size = parseFloat(getComputedStyle(el.passageText).fontSize);
-  if (!Number.isFinite(size)) return;
-
-  for (let i = 0; i < 12 && size - 0.5 >= MIN_PASSAGE_PX; i++) {
-    if (box.scrollHeight <= box.clientHeight) break;
-    size -= 0.5;
-    el.passageText.style.fontSize = size + "px";
+  el.passageText.style.fontSize = "";
+  const size = parseFloat(getComputedStyle(el.passageText).fontSize);
+  if (Number.isFinite(size) && size < MIN_PASSAGE_PX) {
+    el.passageText.style.fontSize = MIN_PASSAGE_PX + "px";
   }
 }
 
@@ -1052,6 +1053,7 @@ function renderRecords() {
 
     tr.append(
       cell(s.label || "—", "label-cell", s.label || ""),
+      cell((s.tags ?? []).join("; ") || "—", "tags-cell"),
       cell(formatClock(s.startMs), "mono", formatFull(s.startMs)),
       cell(s.status === "running" ? "—" : formatClock(s.endMs), "mono",
            typeof s.endMs === "number" ? formatFull(s.endMs) : ""),
@@ -1126,6 +1128,7 @@ async function onStart(press) {
   const payload = {
     ...press,
     label: el.inputLabel.value.trim().slice(0, 80),
+    tags: [...selectedTags],
     uid: state.uid,
   };
 
@@ -1525,7 +1528,7 @@ async function onClearAll() {
 // ── CSV 書き出し ────────────────────────────────────────────
 
 const CSV_HEADER = [
-  "session_id", "label", "status",
+  "session_id", "label", "tags", "status",
   "start_local", "start_iso", "start_ms",
   "end_local", "end_iso", "end_ms",
   "duration_ms", "duration_sec",
@@ -1602,7 +1605,7 @@ async function exportCsv() {
     const lines = [CSV_HEADER.join(",")];
     for (const s of rows) {
       lines.push([
-        csv(s.id), csvText(s.label), csv(s.status),
+        csv(s.id), csvText(s.label), csvText((s.tags ?? []).join("; ")), csv(s.status),
         csv(formatFull(s.startMs)), csv(toIso(s.startMs)), csv(s.startMs),
         csv(formatFull(s.endMs)), csv(toIso(s.endMs)), csv(s.endMs),
         csv(s.durationMs), csv(s.durationMs != null ? (s.durationMs / 1000).toFixed(3) : ""),
@@ -2105,4 +2108,147 @@ function reasonForReport(err) {
  */
 function reasonBesideReport(err) {
   return deleteReports.length > 0 ? reasonForReport(err) : describeError(err);
+}
+
+// カタログの変更は保存成功後に反映する。容量不足時に保存済みと誤認させない。
+function catalogName(value) {
+  const name = value.trim();
+  if (!name || name.length > 40) throw new Error("名前は空白以外の1〜40文字で入力してください。");
+  return name;
+}
+
+function initCatalog() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CATALOG_KEY) ?? "[]");
+    if (!Array.isArray(saved)) throw new Error();
+    const names = new Set();
+    for (const genre of saved) {
+      if (!genre || typeof genre.name !== "string" || catalogName(genre.name) !== genre.name
+          || names.has(genre.name) || !Array.isArray(genre.items)) throw new Error();
+      names.add(genre.name);
+      const items = new Set();
+      for (const item of genre.items) {
+        if (typeof item !== "string" || catalogName(item) !== item || items.has(item)) throw new Error();
+        items.add(item);
+      }
+    }
+    catalog = saved;
+  } catch {
+    el.catalogMessage.textContent = "カタログを読み込めませんでした。保存領域を確認してください。登録済みデータの上書きを防ぐため、編集は停止しています。";
+    el.catalogAdd.disabled = true;
+    renderCatalog();
+    return;
+  }
+  el.catalogAdd.addEventListener("click", () => {
+    if (editCatalog((draft) => {
+      const name = catalogName(el.catalogGenre.value);
+      if (draft.some((g) => g.name === name)) throw new Error("同じジャンルが登録されています。");
+      draft.push({ name, items: [] });
+    })) el.catalogGenre.value = "";
+  });
+  renderCatalog();
+}
+
+function editCatalog(change) {
+  const draft = catalog.map((g) => ({ name: g.name, items: [...g.items] }));
+  try {
+    change(draft);
+  } catch (err) {
+    el.catalogMessage.textContent = err.message;
+    return false;
+  }
+  try {
+    localStorage.setItem(CATALOG_KEY, JSON.stringify(draft));
+  } catch {
+    el.catalogMessage.textContent = "カタログを保存できませんでした。変更は反映していません。端末の保存領域を確認してください。";
+    return false;
+  }
+  catalog = draft;
+  const available = new Set(catalog.flatMap((g) => g.items.map((item) => `${g.name}:${item}`)));
+  for (const tag of selectedTags) if (!available.has(tag)) selectedTags.delete(tag);
+  el.catalogMessage.textContent = "カタログを保存しました。";
+  renderCatalog();
+  return true;
+}
+
+function catalogButton(text, action) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn";
+  button.textContent = text;
+  button.addEventListener("click", action);
+  return button;
+}
+
+function renderCatalog() {
+  el.catalogOptions.replaceChildren();
+  el.catalogEditor.replaceChildren();
+  if (!catalog.some((g) => g.items.length)) {
+    el.catalogOptions.textContent = "まだ何も登録されていません。未選択で計測できます。";
+  }
+  for (const [index, genre] of catalog.entries()) {
+    const choices = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = genre.name;
+    choices.append(legend);
+    for (const item of genre.items) {
+      const tag = `${genre.name}:${item}`;
+      const label = document.createElement("label");
+      label.className = "catalog-choice";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selectedTags.has(tag);
+      input.addEventListener("change", () => {
+        if (input.checked && !selectedTags.has(tag) && selectedTags.size >= 20) {
+          input.checked = false;
+          el.catalogMessage.textContent = "選択できるラベルは20個までです。";
+          return;
+        }
+        if (input.checked) selectedTags.add(tag);
+        else selectedTags.delete(tag);
+        el.catalogMessage.textContent = `${selectedTags.size}個選択しています。`;
+        // コロンを含む名前どうしで同じ保存文字列になる場合も選択表示を揃える。
+        for (const box of el.catalogOptions.querySelectorAll("input")) {
+          box.checked = selectedTags.has(box.value);
+        }
+      });
+      input.value = tag;
+      label.append(input, document.createTextNode(item));
+      choices.append(label);
+    }
+    if (genre.items.length) el.catalogOptions.append(choices);
+
+    const editor = document.createElement("fieldset");
+    const heading = document.createElement("legend");
+    heading.textContent = genre.name;
+    editor.append(heading, catalogButton("ジャンルを削除", () => {
+      if (window.confirm(`「${genre.name}」とその内容をカタログから削除しますか？ 過去の記録は残ります。`)) {
+        editCatalog((draft) => draft.splice(index, 1));
+      }
+    }));
+    for (const [itemIndex, item] of genre.items.entries()) {
+      const row = document.createElement("div");
+      row.append(document.createTextNode(item), catalogButton(`「${item}」を削除`, () => {
+        if (window.confirm(`「${item}」をカタログから削除しますか？ 過去の記録は残ります。`)) {
+          editCatalog((draft) => draft[index].items.splice(itemIndex, 1));
+        }
+      }));
+      editor.append(row);
+    }
+    const label = document.createElement("label");
+    label.className = "field";
+    label.append(document.createTextNode("新しい内容（40文字まで）"));
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 40;
+    label.append(input);
+    editor.append(label, catalogButton("内容を追加", () => {
+      editCatalog((draft) => {
+        const name = catalogName(input.value);
+        if (draft[index].items.includes(name)) throw new Error("同じ内容が登録されています。");
+        draft[index].items.push(name);
+      });
+    }));
+    el.catalogEditor.append(editor);
+  }
 }
