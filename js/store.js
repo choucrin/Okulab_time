@@ -113,6 +113,9 @@ export function startSession(db, roomId, press, sessionId) {
       status: "running",
       label: press.label ?? "",
       tags: press.tags ?? [],
+      mode: press.mode ?? "free",
+      randomBatchId: press.randomBatchId ?? null,
+      randomOutcome: null,
       startMs: press.at,
       startRawMs: press.rawAt,          // 補正前(端末の生の Date.now())
       startOffsetMs: press.offsetMs,
@@ -387,4 +390,28 @@ export async function fetchAllSessions(db, roomId) {
     "記録の読み出しに時間がかかりすぎました。通信状況を確認してください。"
   );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// 判定は同じ値の再送を許容し、異なる判定への変更は拒否する。
+export function decideRandomSession(db, roomId, id, outcome) {
+  return runTransaction(db, async (tx) => {
+    const target = sessionRef(db, roomId, id);
+    const snap = await tx.get(target);
+    const data = snap.exists() ? snap.data() : null;
+    if (!data || data.status !== "done" || data.mode !== "random"
+        || data.startedBy == null || !["confirmed", "discarded"].includes(outcome)) {
+      throw new Error("判定対象の記録を確認できません。");
+    }
+    if (data.randomOutcome === outcome) return;
+    if (data.randomOutcome != null) throw new Error("この記録は既に判定されています。");
+    tx.update(target, { randomOutcome: outcome });
+  });
+}
+
+export function subscribeRandomSession(db, roomId, id, onData, onError) {
+  return onSnapshot(sessionRef(db, roomId, id), { includeMetadataChanges: true }, (snap) => {
+    if (!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) {
+      onData(snap.exists() ? { ...snap.data(), id: snap.id } : null);
+    }
+  }, onError);
 }

@@ -155,6 +155,15 @@ check("Firestore ルールと送信フィールド", () => {
     must(extra.length === 0, `更新処理 #${i + 1} が許可外のフィールドを送信: ${extra.join(", ")}`);
   }
 
+  // ランダム判定は終了更新とは独立した許可リストと照合する。
+  const outcomeAllow = lists.find((list) => list.length === 1 && list[0] === "randomOutcome");
+  must(outcomeAllow, "ランダム判定専用の許可リストがありません");
+  const outcomeBlock = store.match(/tx\.update\(target, \{([^}]+)\}\);/);
+  must(outcomeBlock, "ランダム判定の更新処理がありません");
+  const outcomeFields = [...outcomeBlock[1].matchAll(/(\w+):/g)].map((match) => match[1]);
+  must(outcomeFields.length === 1 && outcomeFields[0] === outcomeAllow[0],
+    "ランダム判定で専用項目以外を更新しています");
+
   // 排他制御ドキュメントに書き込むキー
   const metaBlocks = [...store.matchAll(/tx\.set\(cur, \{([\s\S]*?)\}\)/g)]
     .map((m) => [...m[1].matchAll(/(\w+):/g)].map((x) => x[1]));

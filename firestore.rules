@@ -85,16 +85,37 @@ service cloud.firestore {
             ;
       }
 
+      function validRandomCreate() {
+        return (!('mode' in incoming()) && !('randomBatchId' in incoming())
+                && !('randomOutcome' in incoming()))
+            || (incoming().mode in ['free', 'random']
+                && incoming().randomOutcome == null
+                && ((incoming().mode == 'free' && incoming().randomBatchId == null)
+                    || (incoming().mode == 'random' && incoming().randomBatchId is string
+                        && incoming().randomBatchId.size() > 0
+                        && incoming().randomBatchId.size() <= 128)));
+      }
+
+      function validRandomOutcome() {
+        return resource.data.status == 'done'
+            && resource.data.mode == 'random'
+            && resource.data.startedBy == request.auth.uid
+            && resource.data.randomOutcome == null
+            && incoming().randomOutcome in ['confirmed', 'discarded']
+            && incoming().diff(resource.data).affectedKeys().hasOnly(['randomOutcome']);
+      }
+
       function validCreate() {
         return incoming().status == 'running'
             && incoming().startMs is number
             && incoming().label is string
             && incoming().label.size() <= 200
             && (!('tags' in incoming()) || validTags(incoming().tags))
+            && validRandomCreate()
             && incoming().startedBy == request.auth.uid
             && incoming().endMs == null
             && incoming().keys().hasOnly([
-                 'status', 'label', 'tags',
+                 'status', 'label', 'tags', 'mode', 'randomBatchId', 'randomOutcome',
                  'startMs', 'startRawMs', 'startOffsetMs', 'startAccuracyMs',
                  'startSynced', 'startedBy', 'startedAt',
                  'endMs', 'endRawMs', 'endOffsetMs', 'endAccuracyMs',
@@ -117,7 +138,7 @@ service cloud.firestore {
 
       allow read:   if signedIn();
       allow create: if signedIn() && validCreate();
-      allow update: if signedIn() && validUpdate();
+      allow update: if signedIn() && (validUpdate() || validRandomOutcome());
       allow delete: if signedIn() && resource.data.status != 'running';
     }
   }
