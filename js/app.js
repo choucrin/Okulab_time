@@ -1141,7 +1141,7 @@ async function onStart(press) {
   return startMeasurement(press);
 }
 
-async function startMeasurement(press, reserved = null, initialRandomStart = false) {
+async function startMeasurement(press, reserved = null) {
   if (state.busy || !state.roomId) return;
   if (!reserved && !press.synced && !confirmUnsynced()) return;
 
@@ -1158,14 +1158,11 @@ async function startMeasurement(press, reserved = null, initialRandomStart = fal
   };
 
   await withBusy(async () => {
-    let mayCreate = !reserved || initialRandomStart;
+    // 新方式の予約は受領記録で削除済みと未送信を区別する。
+    // 旧版の予約は判別情報がないため確認専用にする。
+    const existingOnly = Boolean(reserved) && reserved.receiptVersion !== 1;
     const result = await send(
-      () => {
-        const existingOnly = Boolean(reserved) && !mayCreate;
-        // 自動再試行も確認専用。最初の通信が成立後に削除された可能性がある。
-        mayCreate = false;
-        return startSession(db, room, payload, sessionId, { existingOnly });
-      },
+      () => startSession(db, room, payload, sessionId, { existingOnly }),
       () => epoch !== roomEpoch
     );
     // 既に別のルームにいる。画面は触らないが、結果は伝える
@@ -2537,7 +2534,7 @@ async function startRandom(press) {
     await mutateRandom((batch) => {
       if (!batch || batch.next === null) throw new Error("ランダム条件をインポートしてください。");
       batch.pending = {
-        id: newSessionId(db, state.roomId), index: batch.next,
+        id: newSessionId(db, state.roomId), index: batch.next, receiptVersion: 1,
         payload: { ...press, label: el.inputLabel.value.trim().slice(0, 80),
           tags: [...batch.items[batch.next].tags], uid: state.uid,
           mode: "random", randomBatchId: batch.id },
@@ -2545,7 +2542,7 @@ async function startRandom(press) {
     });
     const pending = randomBatch.pending;
     watchRandom();
-    await startMeasurement(press, pending, true);
+    await startMeasurement(press, pending);
   });
 }
 

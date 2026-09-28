@@ -45,6 +45,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 開始の受領記録。計測記録の削除後も再送による復活を防ぐ。
+    match /rooms/{roomId}/startReceipts/{sessionId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['startedBy'])
+          && request.resource.data.startedBy == request.auth.uid
+          && !exists(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId))
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId)).data.mode == 'random'
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId)).data.startedBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // 計測記録。
     match /rooms/{roomId}/sessions/{sessionId} {
 
@@ -93,7 +105,8 @@ service cloud.firestore {
                 && ((incoming().mode == 'free' && incoming().randomBatchId == null)
                     || (incoming().mode == 'random' && incoming().randomBatchId is string
                         && incoming().randomBatchId.size() > 0
-                        && incoming().randomBatchId.size() <= 128)));
+                        && incoming().randomBatchId.size() <= 128
+                        && getAfter(/databases/$(database)/documents/rooms/$(roomId)/startReceipts/$(sessionId)).data.startedBy == request.auth.uid)));
       }
 
       function validRandomOutcome() {
@@ -106,7 +119,8 @@ service cloud.firestore {
       }
 
       function validCreate() {
-        return incoming().status == 'running'
+        return !exists(/databases/$(database)/documents/rooms/$(roomId)/startReceipts/$(sessionId))
+            && incoming().status == 'running'
             && incoming().startMs is number
             && incoming().label is string
             && incoming().label.size() <= 200

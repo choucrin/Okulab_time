@@ -94,6 +94,7 @@ export function newSessionId(db, roomId) {
 export function startSession(db, roomId, press, sessionId, { existingOnly = false } = {}) {
   const cur = currentRef(db, roomId);
   const ref = doc(sessionsCol(db, roomId), sessionId);
+  const receipt = doc(db, "rooms", roomId, "startReceipts", sessionId);
 
   return runTransaction(db, async (tx) => {
     const snap = await tx.get(cur);
@@ -107,8 +108,10 @@ export function startSession(db, roomId, press, sessionId, { existingOnly = fals
       return { ok: true, id: sessionId, duplicate: true, status: existing.data().status };
     }
 
-    // 結果不明からの確認では、削除済みIDを古い開始時刻で復活させない。
-    if (existingOnly) return { ok: false, code: "SESSION_MISSING" };
+    // 受領記録は計測記録と同時に作り、記録削除後も残す。
+    // 応答喪失・再読込・別端末での削除があっても未送信と区別できる。
+    const received = press.mode === "random" ? await tx.get(receipt) : null;
+    if (existingOnly || received?.exists()) return { ok: false, code: "SESSION_MISSING" };
 
     if (activeId) return { ok: false, code: "ALREADY_RUNNING" };
 
@@ -136,6 +139,7 @@ export function startSession(db, roomId, press, sessionId, { existingOnly = fals
       durationMs: null,
       durationSec: null,
     });
+    if (press.mode === "random") tx.set(receipt, { startedBy: press.uid });
     tx.set(cur, { activeSessionId: sessionId, updatedAt: serverTimestamp() });
     return { ok: true, id: sessionId };
   });
