@@ -10,7 +10,7 @@
   "pr_events_reviewed": true,
   "preview_deployments": "deny",
   "after_merge": "agent",
-  "deployment_tasks": [],
+  "deployment_tasks": ["Firebase Hostingの配信設定を確認し、必要な設定とデプロイを行う"],
   "pr_title": ""
 }
 ```
