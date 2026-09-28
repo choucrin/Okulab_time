@@ -1141,7 +1141,7 @@ async function onStart(press) {
   return startMeasurement(press);
 }
 
-async function startMeasurement(press, reserved = null) {
+async function startMeasurement(press, reserved = null, initialRandomStart = false) {
   if (state.busy || !state.roomId) return;
   if (!reserved && !press.synced && !confirmUnsynced()) return;
 
@@ -1158,13 +1158,25 @@ async function startMeasurement(press, reserved = null) {
   };
 
   await withBusy(async () => {
+    let mayCreate = !reserved || initialRandomStart;
     const result = await send(
-      () => startSession(db, room, payload, sessionId),
+      () => {
+        const existingOnly = Boolean(reserved) && !mayCreate;
+        // 自動再試行も確認専用。最初の通信が成立後に削除された可能性がある。
+        mayCreate = false;
+        return startSession(db, room, payload, sessionId, { existingOnly });
+      },
       () => epoch !== roomEpoch
     );
     // 既に別のルームにいる。画面は触らないが、結果は伝える
     if (epoch !== roomEpoch) return reportLateResult("計測開始", result, room);
     if (!result.ok) {
+      if (reserved && result.code === "SESSION_MISSING") {
+        if (await settleRandom({ id: sessionId, randomBatchId: payload.randomBatchId })) {
+          randomMessage("保存した開始操作の記録はサーバーにありません。削除済み、または未送信のため、回数を加算せず次の試行へ進みました。");
+        }
+        return;
+      }
       if (reserved && result.code === "ALREADY_RUNNING") {
         await mutateRandom((batch) => { if (batch.pending?.id === sessionId) batch.pending = null; });
         watchRandom();
@@ -2061,6 +2073,7 @@ function toast(message) {
 
 function describeCode(code) {
   return {
+    SESSION_MISSING: "保存した開始操作の記録がありません。古い開始時刻での再作成は行いません。",
     ALREADY_RUNNING: "すでに計測中です。先に終了するか、「計測を中止」で状態を戻してください。",
     NOT_RUNNING:     "進行中の計測がありません。もう一方の端末で開始してください。",
     STALE_CLEARED:   "進行中の記録が見つからなかったため、状態を初期化しました。もう一度開始してください。",
@@ -2435,11 +2448,27 @@ function watchRandom() {
   const pending = randomBatch?.pending;
   if (!pending || state.role !== "start") return;
   const room = state.roomId;
+  // メモリ上でも保持し、存在確認のローカル保存と削除通知の競合に備える。
+  let observed = pending.observed === true;
+  let updates = Promise.resolve();
   stopRandom = subscribeRandomSession(db, room, pending.id, (record) => {
-    if (room !== state.roomId || randomBatch?.pending?.id !== pending.id) return;
-    randomRecord = record;
-    renderControls();
-    if (record?.status === "aborted" || record?.randomOutcome) settleRandom(record);
+    updates = updates.then(async () => {
+      if (room !== state.roomId || randomBatch?.pending?.id !== pending.id) return;
+      randomRecord = record;
+      renderControls();
+      if (record) {
+        observed = true;
+        // 再読込中・別端末で削除されても、未送信の予約と区別できる。
+        if (!randomBatch.pending.observed) {
+          await mutateRandom((batch) => {
+            if (batch.pending?.id === pending.id) batch.pending.observed = true;
+          });
+        }
+      } else if (observed) {
+        await settleRandom({ id: pending.id, randomBatchId: pending.payload.randomBatchId });
+      }
+      if (record?.status === "aborted" || record?.randomOutcome) await settleRandom(record);
+    }).catch((err) => randomMessage(err.message));
   }, (err) => randomMessage(describeError(err) + " 保存した開始操作を再送・確認してください。"));
 }
 
@@ -2467,8 +2496,13 @@ async function settleRandom(record) {
       randomMessage("すべてのランダム試行が完了しました。任意方式に戻りました。");
     }
     watchRandom();
-  } catch (err) { randomMessage(err.message); }
+  } catch (err) {
+    randomMessage(err.message);
+    renderControls();
+    return false;
+  }
   renderControls();
+  return true;
 }
 
 function renderRandom() {
@@ -2511,7 +2545,7 @@ async function startRandom(press) {
     });
     const pending = randomBatch.pending;
     watchRandom();
-    await startMeasurement(press, pending);
+    await startMeasurement(press, pending, true);
   });
 }
 

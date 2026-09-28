@@ -91,7 +91,7 @@ export function newSessionId(db, roomId) {
  * 計測を開始する。
  * @returns {Promise<{ok:true,id:string,duplicate?:boolean}|{ok:false,code:string}>}
  */
-export function startSession(db, roomId, press, sessionId) {
+export function startSession(db, roomId, press, sessionId, { existingOnly = false } = {}) {
   const cur = currentRef(db, roomId);
   const ref = doc(sessionsCol(db, roomId), sessionId);
 
@@ -106,6 +106,9 @@ export function startSession(db, roomId, press, sessionId) {
     if (existing.exists()) {
       return { ok: true, id: sessionId, duplicate: true, status: existing.data().status };
     }
+
+    // 結果不明からの確認では、削除済みIDを古い開始時刻で復活させない。
+    if (existingOnly) return { ok: false, code: "SESSION_MISSING" };
 
     if (activeId) return { ok: false, code: "ALREADY_RUNNING" };
 
