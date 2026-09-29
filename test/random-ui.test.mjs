@@ -88,3 +88,50 @@ test('設定内外の呼び出しは共通インポートを通り、不要なUI
   assert.match(init, /importRandomItems\(randomDraft\)/);
   assert.match(source, /csvText\(s.randomBatchId \?\? ""\)/);
 });
+
+test('保存確認は開始ボタンの後に置き、回答要求を名前と説明付きで通知する', () => {
+  const html = readSource('index.html');
+  assert.ok(html.indexOf('id="random-confirm"') > html.indexOf('id="btn-start"'));
+  assert.match(html, /id="random-confirm" role="alertdialog"[^>]*aria-describedby="random-confirm-question"[^>]*tabindex="-1"/);
+});
+
+test('保存確認は出現時だけフォーカスし、再描画で回答操作を妨げない', () => {
+  let focusCount = 0;
+  const nodes = new Proxy({}, { get: (target, id) => target[id] ??= {
+    hidden: true, options: [], setAttribute() {}, focus() { focusCount++; },
+  } });
+  const context = vm.createContext({
+    $: id => nodes[id], el: { catalogOptions: {} },
+    state: { busy: false, activeId: null }, randomWorking: false,
+    randomMode: 'free', randomBatch: { pending: { id: 'A' } },
+    randomRecord: { status: 'done' },
+  });
+  vm.runInContext(extractFunction(source, 'renderRandom'), context);
+  vm.runInContext('renderRandom(); renderRandom()', context);
+  assert.equal(nodes['random-confirm'].hidden, false);
+  assert.equal(focusCount, 1);
+  vm.runInContext('randomRecord.randomOutcome = "confirmed"; renderRandom()', context);
+  assert.equal(nodes['random-confirm'].hidden, true);
+  assert.equal(focusCount, 1);
+});
+
+test('試行中止は進行中フラグが別IDまたはnullでも指定した試行IDを送る', async () => {
+  assert.match(extractFunction(source, 'initRandom'), /onAbort\(randomBatch.pending.id\)/);
+  for (const activeId of ['B', null]) {
+    const sent = [];
+    const context = vm.createContext({
+      state: { roomId: 'room', uid: 'user', busy: false, activeId },
+      roomEpoch: 1, db: {}, confirm: () => true,
+      withBusy: async fn => fn(), send: async fn => fn(),
+      abortSession: async (_db, _room, payload) => {
+        sent.push(payload.expectedId);
+        return { ok: false, code: 'SESSION_CHANGED' };
+      },
+      notice() {}, describeCode: code => code,
+      applyCurrent() { assert.fail('拒否時に進行中状態を解除しない'); },
+    });
+    vm.runInContext(extractFunction(source, 'onAbort'), context);
+    await vm.runInContext('onAbort("A")', context);
+    assert.deepEqual(sent, ['A']);
+  }
+});

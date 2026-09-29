@@ -171,16 +171,16 @@
       </section>
       <section id="random-progress" aria-label="ランダム試行状況" hidden></section>
       <button type="button" class="btn btn--danger" id="random-interrupt" aria-describedby="random-interrupt-hint" hidden>ランダム計測を中断</button>
-      <div id="random-confirm" role="region" aria-label="記録の保存確認" hidden>
-        <p>今回の記録を保存しますか？</p>
-        <button type="button" class="btn" id="random-yes">Yes</button>
-        <button type="button" class="btn" id="random-no">No</button>
-      </div>
       <button type="button" class="btn" id="random-retry" hidden>保存した開始操作を再送・確認</button>
       <button type="button" class="bigbtn bigbtn--start" id="btn-start" disabled>
         <span class="bigbtn__title">計測開始</span>
         <span class="bigbtn__sub" id="start-sub">接続中…</span>
       </button>
+      <div id="random-confirm" role="alertdialog" aria-label="記録の保存確認" aria-describedby="random-confirm-question" tabindex="-1" hidden>
+        <p id="random-confirm-question">今回の記録を保存しますか？</p>
+        <button type="button" class="btn" id="random-yes">Yes</button>
+        <button type="button" class="btn" id="random-no">No</button>
+      </div>
       <p id="random-interrupt-hint" class="muted" role="status"></p>
       <p id="random-message" role="status"></p>
     </div>

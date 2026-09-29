@@ -270,7 +270,7 @@ function bindEvents() {
   el.btnLeave.addEventListener("click", onLeave);
   el.btnCsv.addEventListener("click", exportCsv);
   el.btnClear.addEventListener("click", onClearAll);
-  el.btnAbort.addEventListener("click", onAbort);
+  el.btnAbort.addEventListener("click", () => onAbort());
   el.recordBody.addEventListener("click", onRecordClick);
   // 消すのは押した意思のあるときだけ。欄そのものを押せるようにすると、
   // 大きな計測ボタンの隣で誤って触れ、確認ダイアログが次の押下を飲み込む。
@@ -1243,13 +1243,12 @@ function confirmUnsynced() {
   );
 }
 
-async function onAbort() {
+async function onAbort(expectedId = state.activeId) {
   if (state.busy || !state.roomId) return;
 
   const room = state.roomId;
   const epoch = roomEpoch;
   const uid = state.uid;
-  const expectedId = state.activeId;
 
   const message = expectedId
     ? "進行中の計測を中止します。よろしいですか?"
@@ -2583,7 +2582,11 @@ function renderRandom() {
   $("random-interrupt-hint").textContent = pending && !running
     ? (randomRecord?.status === "done" && !randomRecord?.randomOutcome
       ? "先に今回の記録の保存可否を選んでください。" : "開始操作・試行結果の確認が終わるまで中断できません。") : "";
-  $("random-confirm").hidden = !pending || randomRecord?.status !== "done" || Boolean(randomRecord?.randomOutcome);
+  const confirmation = $("random-confirm");
+  const wasHidden = confirmation.hidden;
+  confirmation.hidden = !pending || randomRecord?.status !== "done" || Boolean(randomRecord?.randomOutcome);
+  // 再描画ごとに回答ボタンからフォーカスを奪わず、出現時だけ回答要求を通知する。
+  if (wasHidden && !confirmation.hidden) confirmation.focus();
   $("random-yes").disabled = randomWorking || state.busy;
   $("random-no").disabled = randomWorking || state.busy;
   $("random-retry").hidden = !pending || Boolean(randomRecord);
@@ -2769,7 +2772,7 @@ function initRandom() {
   $("random-import").addEventListener("click", () => randomAction(() => importRandomItems(randomDraft)));
   $("random-interrupt").addEventListener("click", () => {
     if (state.busy || randomWorking) return;
-    if (randomBatch?.pending && randomRecord?.status === "running") return onAbort();
+    if (randomBatch?.pending && randomRecord?.status === "running") return onAbort(randomBatch.pending.id);
     return randomAction(interruptRandom);
   });
   const decide = (outcome) => randomAction(async () => {
