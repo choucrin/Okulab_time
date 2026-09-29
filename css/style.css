@@ -622,3 +622,16 @@ button:focus-visible {
 .catalog-choice input { width: 20px; height: 20px; flex: none; }
 .catalog .btn { margin: 4px; }
 .tags-cell { white-space: normal; min-width: 12ch; overflow-wrap: anywhere; }
+
+/* ランダム設定は既存のパネル内で開く。狭い画面でも操作領域を確保する。 */
+#random-settings .btn { margin: 4px 2px; min-height: 44px; }
+#random-settings input, #random-settings select, #measurement-mode {
+  max-width: 100%;
+  min-height: 44px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+}
+#random-progress { padding: 12px 0; line-height: 1.8; overflow-wrap: anywhere; }
+#random-confirm .btn { min-width: 88px; min-height: 44px; }
+#random-message:empty { display: none; }

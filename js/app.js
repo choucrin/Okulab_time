@@ -13,9 +13,10 @@ import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
   collectDeletable, deleteSessions, isUncertain, SESSION_LIMIT,
+  decideRandomSession, subscribeRandomSession,
 } from "./store.js";
 
-export const APP_VERSION = "v.02.2";
+export const APP_VERSION = "v.03.0";
 
 const CATALOG_KEY = "okulab-time/catalog";
 let catalog = [];
@@ -151,6 +152,16 @@ let noticeOwner = null;         // その知らせを出した操作
 let noticeKey = null;           // その知らせが指している対象(記録の id など)
 let lateReports = [];           // 退出したあとに終わった操作の結果({ text, rank })
 
+const RANDOM_KEY = "okulab-time/random/";
+let randomMode = "free";
+let randomBatch = null;
+let randomSnapshot = null;
+let randomDraft = [];
+let randomSelection = new Set();
+let randomRecord = undefined;
+let randomWorking = false;
+let stopRandom = null;
+
 // ── 起動 ────────────────────────────────────────────────────
 
 main();
@@ -158,6 +169,7 @@ main();
 function main() {
   el.version.textContent = APP_VERSION;
   initCatalog();
+  initRandom();
 
   window.addEventListener("unhandledrejection", (event) => {
     console.error("[okulab-time] 未処理のエラー:", event.reason);
@@ -519,6 +531,7 @@ function enterRoom(roomId, role, participant = false) {
 
   state.roomId = roomId;
   state.role = role;
+  restoreRandom();
   state.sessions = [];
   state.activeId = null;
   state.sessionsLoaded = false;
@@ -769,6 +782,8 @@ function onLeave() {
 
 /** ルームに紐づく購読・タイマー・送信中の操作をすべて無効化する */
 function teardownRoom() {
+  stopRandom?.();
+  stopRandom = null;
   roomEpoch += 1;   // 実行中の再送があっても、その結果を反映させない
   stopWatchdog();
   if (stopSessions) { stopSessions(); stopSessions = null; }
@@ -974,6 +989,7 @@ function stopTicker() {
 }
 
 function renderControls() {
+  renderRandom();
   syncRecordsButtons();   // 計測中は一括削除も押せない。見た目を合わせる
   const ready = state.currentLoaded;
   const running = Boolean(state.activeId);
@@ -982,7 +998,8 @@ function renderControls() {
   // 表示が実際の状態と食い違っていても操作不能にならないよう、
   // 可否の最終判断はサーバーのトランザクションに委ねる。
   // 押せないようにすると、その間の「押した瞬間」が失われてしまう。
-  el.btnStart.disabled = !ready || state.busy;
+  el.btnStart.disabled = !ready || state.busy || randomWorking
+    || (randomMode === "random" && (!randomBatch || randomBatch.next === null || Boolean(randomBatch.pending)));
   el.btnEnd.disabled = !ready || state.busy;
   // 想定外の操作は見た目で抑制する(押すことはできる)
   el.btnStart.classList.toggle("bigbtn--unexpected", ready && running);
@@ -1055,6 +1072,7 @@ function renderRecords() {
     tr.append(
       cell(s.label || "—", "label-cell", s.label || ""),
       cell((s.tags ?? []).join("; ") || "—", "tags-cell"),
+      cell(randomRecordText(s)),
       cell(formatClock(s.startMs), "mono", formatFull(s.startMs)),
       cell(s.status === "running" ? "—" : formatClock(s.endMs), "mono",
            typeof s.endMs === "number" ? formatFull(s.endMs) : ""),
@@ -1118,15 +1136,21 @@ function worstAccuracy(s) {
 // ── 操作 ────────────────────────────────────────────────────
 
 async function onStart(press) {
+  if (randomWorking) return;
+  if (randomMode === "random") return startRandom(press);
+  return startMeasurement(press);
+}
+
+async function startMeasurement(press, reserved = null) {
   if (state.busy || !state.roomId) return;
-  if (!press.synced && !confirmUnsynced()) return;
+  if (!reserved && !press.synced && !confirmUnsynced()) return;
 
   // 送信先は操作した時点のルームに固定する(再送中に退出・再参加されても移らない)
   const room = state.roomId;
   const epoch = roomEpoch;
   // 再送しても同じ記録になるよう、ID は送信前に 1 回だけ決める
-  const sessionId = newSessionId(db, room);
-  const payload = {
+  const sessionId = reserved?.id ?? newSessionId(db, room);
+  const payload = reserved?.payload ?? {
     ...press,
     label: el.inputLabel.value.trim().slice(0, 80),
     tags: [...selectedTags],
@@ -1134,13 +1158,28 @@ async function onStart(press) {
   };
 
   await withBusy(async () => {
+    // 新方式の予約は受領記録で削除済みと未送信を区別する。
+    // 旧版の予約は判別情報がないため確認専用にする。
+    const existingOnly = Boolean(reserved) && reserved.receiptVersion !== 1;
     const result = await send(
-      () => startSession(db, room, payload, sessionId),
+      () => startSession(db, room, payload, sessionId, { existingOnly }),
       () => epoch !== roomEpoch
     );
     // 既に別のルームにいる。画面は触らないが、結果は伝える
     if (epoch !== roomEpoch) return reportLateResult("計測開始", result, room);
-    if (!result.ok) return handleCode(result.code);
+    if (!result.ok) {
+      if (reserved && result.code === "SESSION_MISSING") {
+        if (await settleRandom({ id: sessionId, randomBatchId: payload.randomBatchId })) {
+          randomMessage("保存した開始操作の記録はサーバーにありません。削除済み、または未送信のため、回数を加算せず次の試行へ進みました。");
+        }
+        return;
+      }
+      if (reserved && result.code === "ALREADY_RUNNING") {
+        await mutateRandom((batch) => { if (batch.pending?.id === sessionId) batch.pending = null; });
+        watchRandom();
+      }
+      return handleCode(result.code);
+    }
 
     if (result.duplicate && result.status && result.status !== "running") {
       toast("この計測は既に終了しています(再送を確認)");
@@ -1529,7 +1568,7 @@ async function onClearAll() {
 // ── CSV 書き出し ────────────────────────────────────────────
 
 const CSV_HEADER = [
-  "session_id", "label", "tags", "status",
+  "session_id", "label", "tags", "status", "mode", "random_batch_id", "random_outcome",
   "start_local", "start_iso", "start_ms",
   "end_local", "end_iso", "end_ms",
   "duration_ms", "duration_sec",
@@ -1607,6 +1646,7 @@ async function exportCsv() {
     for (const s of rows) {
       lines.push([
         csv(s.id), csvText(s.label), csvText((s.tags ?? []).join("; ")), csv(s.status),
+        csv(s.mode === "random" ? "ランダム" : "任意"), csvText(s.randomBatchId ?? ""), csvText(randomOutcomeText(s)),
         csv(formatFull(s.startMs)), csv(toIso(s.startMs)), csv(s.startMs),
         csv(formatFull(s.endMs)), csv(toIso(s.endMs)), csv(s.endMs),
         csv(s.durationMs), csv(s.durationMs != null ? (s.durationMs / 1000).toFixed(3) : ""),
@@ -2030,6 +2070,7 @@ function toast(message) {
 
 function describeCode(code) {
   return {
+    SESSION_MISSING: "保存した開始操作の記録がありません。古い開始時刻での再作成は行いません。",
     ALREADY_RUNNING: "すでに計測中です。先に終了するか、「計測を中止」で状態を戻してください。",
     NOT_RUNNING:     "進行中の計測がありません。もう一方の端末で開始してください。",
     STALE_CLEARED:   "進行中の記録が見つからなかったため、状態を初期化しました。もう一度開始してください。",
@@ -2237,12 +2278,17 @@ function renderCatalog() {
       input.type = "checkbox";
       input.checked = selectedTags.has(tag);
       input.addEventListener("change", () => {
-        if (input.checked && !selectedTags.has(tag) && selectedTags.size >= 20) {
+        const previous = genre.items.map((value) => catalogTag(genre.name, value));
+        if (input.checked && !previous.some((value) => selectedTags.has(value)) && selectedTags.size >= 20) {
           input.checked = false;
           el.catalogMessage.textContent = "選択できるラベルは20個までです。";
           return;
         }
-        if (input.checked) selectedTags.add(tag);
+        if (input.checked) {
+          for (const value of previous) selectedTags.delete(value);
+          selectedTags.add(tag);
+          for (const other of choices.querySelectorAll("input")) other.checked = other.value === tag;
+        }
         else selectedTags.delete(tag);
         el.catalogMessage.textContent = `${selectedTags.size}個選択しています。`;
       });
@@ -2285,4 +2331,370 @@ function renderCatalog() {
     }));
     el.catalogEditor.append(editor);
   }
+}
+
+// ランダム設定と進行状況は端末内だけに保存する。
+function randomOutcomeText(record) {
+  if (record.mode !== "random") return "";
+  return record.randomOutcome === "confirmed" ? "有効"
+    : record.randomOutcome === "discarded" ? "ランダム試行内のエラーデータ" : "未確定";
+}
+
+function randomRecordText(record) {
+  return record.mode === "random"
+    ? `ランダム / ${record.randomBatchId} / ${randomOutcomeText(record)}` : "任意";
+}
+
+function validateRandomItems(items) {
+  if (!Array.isArray(items) || !items.length) throw new Error("項目を1つ以上追加してください。");
+  let total = 0;
+  for (const item of items) {
+    if (!item || !Number.isSafeInteger(item.count) || item.count < 1
+        || !Array.isArray(item.tags) || item.tags.length > 20) throw new Error("試行回数は1以上の安全な整数で指定してください。");
+    const genres = new Set();
+    for (const tag of item.tags) {
+      if (typeof tag !== "string" || tag.length > 241 || !/^[^:]+:[^:]+$/.test(tag)) throw new Error("選択式ラベルが不正です。");
+      const genre = tag.split(":")[0];
+      if (genres.has(genre)) throw new Error("同一ジャンルのラベルは1つまでです。");
+      genres.add(genre);
+    }
+    total += item.count;
+    if (!Number.isSafeInteger(total)) throw new Error("総試行回数が大きすぎます。");
+  }
+  return total;
+}
+
+function chooseRandomItem(items, rng = Math.random) {
+  const remaining = items.reduce((sum, item) => sum + item.count - item.done, 0);
+  if (!remaining) return null;
+  let point = rng() * remaining;
+  for (let i = 0; i < items.length; i += 1) {
+    point -= items[i].count - items[i].done;
+    if (point < 0) return i;
+  }
+  throw new Error("抽選に失敗しました。");
+}
+
+function randomMessage(message) { $("random-message").textContent = message; }
+
+async function randomAction(action) {
+  if (randomWorking) return;
+  randomWorking = true;
+  renderControls();
+  try { await action(); }
+  catch (err) { randomMessage(err.userMessage ?? err.message ?? describeError(err)); }
+  finally { randomWorking = false; renderControls(); }
+}
+
+// 複数タブが同じ古い画面から進行状態を更新することを拒否する。
+async function mutateRandom(change) {
+  if (!navigator.locks?.request) throw new Error("安全な保存にはWeb Locks対応ブラウザとHTTPS接続が必要です。");
+  const room = state.roomId;
+  const expected = randomSnapshot;
+  return navigator.locks.request(RANDOM_KEY + room, () => {
+    if (room !== state.roomId) throw new Error("ルームが変わりました。操作をやり直してください。");
+    const current = localStorage.getItem(RANDOM_KEY + room);
+    if (current !== expected) {
+      restoreRandom();
+      throw new Error("別のタブで進行状況が変わりました。最新の表示を確認してください。");
+    }
+    const next = randomBatch ? JSON.parse(JSON.stringify(randomBatch)) : null;
+    const updated = change(next) ?? next;
+    const serialized = JSON.stringify(updated);
+    localStorage.setItem(RANDOM_KEY + room, serialized);
+    randomBatch = updated;
+    randomSnapshot = serialized;
+  });
+}
+
+function restoreRandom() {
+  stopRandom?.();
+  stopRandom = null;
+  randomRecord = undefined;
+  randomMode = "free";
+  randomBatch = null;
+  randomSnapshot = null;
+  $("random-settings").hidden = true;
+  try {
+    randomSnapshot = localStorage.getItem(RANDOM_KEY + state.roomId);
+    const saved = JSON.parse(randomSnapshot ?? "null");
+    if (saved) {
+      validateRandomItems(saved.items);
+      if (typeof saved.id !== "string" || !saved.id || saved.items.some((item) =>
+        !Number.isSafeInteger(item.done) || item.done < 0 || item.done > item.count)
+        || (saved.next !== null && (!Number.isInteger(saved.next) || !saved.items[saved.next]
+          || saved.items[saved.next].done >= saved.items[saved.next].count))
+        || (saved.pending && (typeof saved.pending.id !== "string" || !saved.items[saved.pending.index]
+          || saved.pending.payload?.randomBatchId !== saved.id))) throw new Error("保存済み進行状況が不正です。");
+      randomBatch = saved;
+      if (saved.next !== null || saved.pending) randomMode = saved.mode ?? "random";
+    }
+    randomMessage("");
+    if (state.role === "start") watchRandom();
+  } catch {
+    randomMessage("ランダム進行状況を読み込めません。保存領域を確認してください。既存データは上書きしません。");
+    // 比較を必ず失敗させ、破損した保存内容を上書きさせない。
+    randomSnapshot = Symbol("invalid");
+  }
+}
+
+function watchRandom() {
+  stopRandom?.();
+  stopRandom = null;
+  randomRecord = undefined;
+  const pending = randomBatch?.pending;
+  if (!pending || state.role !== "start") return;
+  const room = state.roomId;
+  // メモリ上でも保持し、存在確認のローカル保存と削除通知の競合に備える。
+  let observed = pending.observed === true;
+  let updates = Promise.resolve();
+  stopRandom = subscribeRandomSession(db, room, pending.id, (record) => {
+    updates = updates.then(async () => {
+      if (room !== state.roomId || randomBatch?.pending?.id !== pending.id) return;
+      randomRecord = record;
+      renderControls();
+      if (record) {
+        observed = true;
+        // 再読込中・別端末で削除されても、未送信の予約と区別できる。
+        if (!randomBatch.pending.observed) {
+          await mutateRandom((batch) => {
+            if (batch.pending?.id === pending.id) batch.pending.observed = true;
+          });
+        }
+      } else if (observed) {
+        await settleRandom({ id: pending.id, randomBatchId: pending.payload.randomBatchId });
+      }
+      if (record?.status === "aborted" || record?.randomOutcome) await settleRandom(record);
+    }).catch((err) => randomMessage(err.message));
+  }, (err) => randomMessage(describeError(err) + " 保存した開始操作を再送・確認してください。"));
+}
+
+async function settleRandom(record) {
+  const epoch = roomEpoch;
+  // 判定書き込みとローカル保存の間で閉じても、同じ記録を購読し直して再開できる。
+  try {
+    await mutateRandom((batch) => {
+      const pending = batch.pending;
+      if (!pending || pending.id !== record.id) return;
+      if (record.randomBatchId !== batch.id) throw new Error("バッチ識別子が一致しません。");
+      if (record.randomOutcome === "confirmed") {
+        const item = batch.items[pending.index];
+        if (item.done >= item.count) throw new Error("試行回数が上限に達しています。");
+        item.done += 1;
+        batch.previous = [...item.tags];
+      }
+      batch.pending = null;
+      batch.next = chooseRandomItem(batch.items);
+      if (batch.next === null) batch.mode = "free";
+    });
+    if (epoch !== roomEpoch) return;
+    if (randomBatch.next === null) {
+      randomMode = "free";
+      randomMessage("すべてのランダム試行が完了しました。任意方式に戻りました。");
+    }
+    watchRandom();
+  } catch (err) {
+    randomMessage(err.message);
+    renderControls();
+    return false;
+  }
+  renderControls();
+  return true;
+}
+
+function renderRandom() {
+  const active = randomMode === "random";
+  const pending = randomBatch?.pending;
+  $("measurement-mode").value = randomMode;
+  $("measurement-mode").disabled = state.busy || randomWorking || Boolean(pending) || Boolean(state.activeId);
+  $("random-open").hidden = !active;
+  $("random-open").disabled = state.busy || randomWorking || Boolean(pending) || Boolean(state.activeId);
+  $("random-progress").hidden = !active;
+  el.catalogOptions.hidden = active;
+  if (active) {
+    const batch = randomBatch;
+    const count = batch?.items.reduce((sum, item) => sum + item.done, 0) ?? 0;
+    const total = batch?.items.reduce((sum, item) => sum + item.count, 0) ?? 0;
+    const labels = (tags) => tags ? tags.join("; ") || "ラベルなし" : "なし";
+    $("random-progress").textContent = batch
+      ? `前回試行内容: ${labels(batch.previous)} ／ 次回試行内容: ${labels(batch.items[batch.next]?.tags)} ／ 累計試行回数: ${count} ／ 残り試行回数: ${total - count}`
+      : "ランダム条件設定ページで項目を登録し、インポートしてください。";
+  }
+  $("random-confirm").hidden = !pending || randomRecord?.status !== "done" || Boolean(randomRecord?.randomOutcome);
+  $("random-yes").disabled = randomWorking || state.busy;
+  $("random-no").disabled = randomWorking || state.busy;
+  $("random-retry").hidden = !pending || Boolean(randomRecord);
+  $("random-retry").disabled = randomWorking || state.busy;
+}
+
+async function startRandom(press) {
+  if (state.busy || randomWorking || !state.roomId || randomBatch?.pending) return;
+  if (!press.synced && !confirmUnsynced()) return;
+  await randomAction(async () => {
+    await mutateRandom((batch) => {
+      if (!batch || batch.next === null) throw new Error("ランダム条件をインポートしてください。");
+      batch.pending = {
+        id: newSessionId(db, state.roomId), index: batch.next, receiptVersion: 1,
+        payload: { ...press, label: el.inputLabel.value.trim().slice(0, 80),
+          tags: [...batch.items[batch.next].tags], uid: state.uid,
+          mode: "random", randomBatchId: batch.id },
+      };
+    });
+    const pending = randomBatch.pending;
+    watchRandom();
+    await startMeasurement(press, pending);
+  });
+}
+
+function renderRandomSettings() {
+  const options = $("random-options");
+  options.replaceChildren();
+  const available = new Set(catalog.flatMap((genre) => genre.items.map((item) => catalogTag(genre.name, item))));
+  randomSelection = new Set([...randomSelection].filter((tag) => available.has(tag)));
+  if (!available.size) options.textContent = "まだ何も登録されていません。未選択で項目を追加できます。";
+  for (const genre of catalog) {
+    const field = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = genre.name;
+    field.append(legend);
+    for (const item of genre.items) {
+      const tag = catalogTag(genre.name, item);
+      const label = document.createElement("label");
+      label.className = "catalog-choice";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = randomSelection.has(tag);
+      input.addEventListener("change", () => {
+        const sameGenre = genre.items.map((value) => catalogTag(genre.name, value));
+        if (input.checked && randomSelection.size >= 20 && !sameGenre.some((value) => randomSelection.has(value))) {
+          input.checked = false;
+          randomMessage("選択できるラベルは20個までです。");
+          return;
+        }
+        if (input.checked) {
+          for (const value of sameGenre) randomSelection.delete(value);
+          randomSelection.add(tag);
+        } else randomSelection.delete(tag);
+        renderRandomSettings();
+      });
+      label.append(input, document.createTextNode(item));
+      field.append(label);
+    }
+    options.append(field);
+  }
+  $("random-items").replaceChildren();
+  randomDraft.forEach((item, index) => {
+    const row = document.createElement("p");
+    row.append(document.createTextNode(`${item.tags.join("; ") || "ラベルなし"} — ${item.count}回 `),
+      catalogButton("削除", () => { randomDraft.splice(index, 1); renderRandomSettings(); }));
+    $("random-items").append(row);
+  });
+  $("random-total").textContent = `総試行回数: ${randomDraft.reduce((sum, item) => sum + item.count, 0)}`;
+}
+
+function readRandomSets() {
+  const sets = JSON.parse(localStorage.getItem(RANDOM_KEY + "sets") ?? "[]");
+  if (!Array.isArray(sets)) throw new Error("保存済みセットが不正です。");
+  const names = new Set();
+  for (const set of sets) {
+    if (typeof set.name !== "string" || catalogName(set.name) !== set.name || names.has(set.name)) throw new Error("保存名が不正です。");
+    names.add(set.name);
+    validateRandomItems(set.items);
+  }
+  return sets;
+}
+
+function renderRandomSets() {
+  const sets = readRandomSets();
+  $("random-saved").replaceChildren();
+  for (const set of sets) {
+    const option = document.createElement("option");
+    option.value = set.name;
+    option.textContent = set.name;
+    $("random-saved").append(option);
+  }
+}
+
+function initRandom() {
+  $("measurement-mode").addEventListener("change", () => {
+    const mode = $("measurement-mode").value;
+    return randomAction(async () => {
+      if (state.busy || state.activeId || randomBatch?.pending) return;
+      if (randomBatch) await mutateRandom((batch) => { batch.mode = mode; });
+      randomMode = mode;
+      $("random-settings").hidden = true;
+    });
+  });
+  $("random-open").addEventListener("click", () => randomAction(() => {
+    $("random-settings").hidden = false;
+    renderRandomSettings();
+    renderRandomSets();
+    $("random-count").focus();
+  }));
+  $("random-close").addEventListener("click", () => { $("random-settings").hidden = true; });
+  $("random-add").addEventListener("click", () => randomAction(() => {
+    const item = { tags: [...randomSelection], count: Number($("random-count").value) };
+    validateRandomItems([...randomDraft, item]);
+    randomDraft.push(item);
+    renderRandomSettings();
+  }));
+  $("random-save").addEventListener("click", () => randomAction(async () => {
+    const name = catalogName($("random-name").value);
+    validateRandomItems(randomDraft);
+    if (!navigator.locks?.request) throw new Error("安全な保存にはWeb Locks対応ブラウザとHTTPS接続が必要です。");
+    await navigator.locks.request(RANDOM_KEY + "sets", () => {
+      const sets = readRandomSets();
+      const old = sets.findIndex((set) => set.name === name);
+      if (old >= 0 && !confirm(`「${name}」を上書きしますか？`)) return;
+      const saved = { name, items: randomDraft };
+      if (old >= 0) sets[old] = saved;
+      else sets.push(saved);
+      localStorage.setItem(RANDOM_KEY + "sets", JSON.stringify(sets));
+      randomMessage("ランダム条件セットを保存しました。");
+      renderRandomSets();
+    });
+  }));
+  $("random-load").addEventListener("click", () => randomAction(() => {
+    const saved = readRandomSets().find((set) => set.name === $("random-saved").value);
+    if (!saved) throw new Error("保存済みセットを選んでください。");
+    randomDraft = saved.items;
+    $("random-name").value = saved.name;
+    renderRandomSettings();
+  }));
+  $("random-import").addEventListener("click", () => randomAction(async () => {
+    if (state.busy || state.activeId || randomBatch?.pending) throw new Error("計測と確認を完了してからインポートしてください。");
+    validateRandomItems(randomDraft);
+    if (randomBatch?.next != null && !confirm("既存バッチの残り試行分を破棄し、新しいバッチに置き換えますか？記録は残ります。")) return;
+    await mutateRandom(() => {
+      const items = randomDraft.map((item) => ({ tags: [...item.tags], count: item.count, done: 0 }));
+      return { id: crypto.randomUUID(), items, previous: null, next: chooseRandomItem(items), pending: null, mode: "random" };
+    });
+    randomMode = "random";
+    $("random-settings").hidden = true;
+    randomMessage("ランダムバッチを確定しました。");
+    watchRandom();
+  }));
+  const decide = (outcome) => randomAction(async () => {
+    const pending = randomBatch?.pending;
+    if (!pending || randomRecord?.status !== "done") return;
+    const epoch = roomEpoch;
+    await decideRandomSession(db, state.roomId, pending.id, outcome);
+    if (epoch !== roomEpoch) return;
+    // ローカル回数はサーバー購読の確定結果だけから進める。
+    watchRandom();
+  });
+  $("random-yes").addEventListener("click", () => decide("confirmed"));
+  $("random-no").addEventListener("click", () => decide("discarded"));
+  $("random-retry").addEventListener("click", () => randomAction(async () => {
+    const pending = randomBatch?.pending;
+    if (!pending) return;
+    watchRandom();
+    await startMeasurement(pending.payload, pending);
+  }));
+  window.addEventListener("storage", (event) => {
+    if (state.roomId && event.key === RANDOM_KEY + state.roomId) {
+      restoreRandom();
+      renderControls();
+    }
+  });
 }

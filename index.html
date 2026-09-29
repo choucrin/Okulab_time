@@ -129,6 +129,25 @@
 
     <!-- 開始パネル -->
     <div class="panel" id="panel-start" hidden>
+      <label class="field">計測条件
+        <select id="measurement-mode"><option value="free">任意</option><option value="random">ランダム</option></select>
+      </label>
+      <button type="button" class="btn" id="random-open" hidden>ランダム条件設定ページ</button>
+      <section id="random-settings" class="catalog" aria-label="ランダム条件設定ページ" hidden>
+        <h2>ランダム条件設定</h2>
+        <div id="random-options"></div>
+        <label class="field">試行回数<input id="random-count" type="number" min="1" step="1" value="1"></label>
+        <button type="button" class="btn" id="random-add">項目を追加</button>
+        <div id="random-items"></div>
+        <label class="field">保存名<input id="random-name" maxlength="40"></label>
+        <button type="button" class="btn" id="random-save">名前を付けて保存</button>
+        <label class="field">保存済みセット<select id="random-saved"></select></label>
+        <button type="button" class="btn" id="random-load">呼び出す</button>
+        <button type="button" class="btn" id="random-import">この内容で計測に使う</button>
+        <button type="button" class="btn" id="random-close">設定を閉じる</button>
+        <p id="random-total" role="status"></p>
+      </section>
+      <p id="random-message" role="status"></p>
       <label class="field">
         <span class="field__label">ラベル(任意)</span>
         <input type="text" id="input-label" maxlength="80"
@@ -136,7 +155,7 @@
                placeholder="被験者名・条件名など">
       </label>
       <section class="catalog" aria-label="選択式ラベル">
-        <p>選択式ラベル（任意・最大20個）</p>
+        <p>選択式ラベル（各ジャンル1個まで・最大20個）</p>
         <p>カタログはこの端末に保存され、すべてのルームで利用できます。</p>
         <div id="catalog-options"></div>
         <details>
@@ -149,6 +168,13 @@
         </details>
         <p id="catalog-message" role="status"></p>
       </section>
+      <section id="random-progress" aria-label="ランダム試行状況" hidden></section>
+      <div id="random-confirm" hidden>
+        <p>今回の記録を保存しますか？</p>
+        <button type="button" class="btn" id="random-yes">Yes</button>
+        <button type="button" class="btn" id="random-no">No</button>
+      </div>
+      <button type="button" class="btn" id="random-retry" hidden>保存した開始操作を再送・確認</button>
       <button type="button" class="bigbtn bigbtn--start" id="btn-start" disabled>
         <span class="bigbtn__title">計測開始</span>
         <span class="bigbtn__sub" id="start-sub">接続中…</span>
@@ -195,7 +221,7 @@
           <thead>
             <tr>
               <th scope="col">ラベル</th>
-              <th scope="col">選択式ラベル</th>
+              <th scope="col">選択式ラベル</th><th scope="col">方式 / バッチ / 判定</th>
               <th scope="col">開始</th>
               <th scope="col">終了</th>
               <th scope="col" class="num">経過(秒)</th>
@@ -221,7 +247,7 @@
 <!-- ───────── 被験者用画面 ───────── -->
 <!-- 実験の内容を知らせないため、状態表示・経過時間・記録を一切置かない -->
 <section id="screen-participant" class="screen-participant" hidden>
-  <button type="button" class="detect" id="btn-detect">気づきを検出</button>
+  <button type="button" class="detect" id="btn-detect" aria-label="気づきを検出"><span class="sr-only">気づきを検出</span></button>
 
   <div class="reading">
     <p class="reading__text" id="passage-text"></p>
@@ -233,7 +259,7 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.02.2</p>
+<p class="version" id="version">v.03.0</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

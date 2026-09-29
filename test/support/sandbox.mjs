@@ -83,15 +83,73 @@ export function createCatalogTab({ localStorage, locks, catalogMessage = {} }) {
 /** catalogName/catalogTag/readCatalog/csv/csvText のみを実行する、状態を持たない検証用サンドボックス。 */
 export function createPureFunctions() {
   const appSrc = readSource("js/app.js");
-  const names = ["catalogName", "catalogTag", "readCatalog", "csv", "csvText"];
+  const names = [
+    "catalogName", "catalogTag", "readCatalog", "csv", "csvText",
+    "validateRandomItems", "chooseRandomItem", "randomOutcomeText", "randomRecordText",
+  ];
   const bodies = names.map((name) => extractFunction(appSrc, name));
   const wrapped = `
     (function () {
       ${bodies.join("\n\n")}
-      return { catalogName, catalogTag, readCatalog, csv, csvText };
+      return {
+        catalogName, catalogTag, readCatalog, csv, csvText,
+        validateRandomItems, chooseRandomItem, randomOutcomeText, randomRecordText,
+      };
     })()
   `;
   const sandbox = { console };
+  vm.createContext(sandbox);
+  return vm.runInContext(wrapped, sandbox);
+}
+
+/**
+ * ランダム進行状況(mutateRandom/restoreRandom/readRandomSets)を、指定した
+ * localStorage・navigator.locks を使う1つの「タブ」として実行できるオブジェクト
+ * にまとめて返す(F-9)。createCatalogTab と同じく、実際に出荷される js/app.js
+ * の関数本体をそのまま実行する。
+ *
+ * watchRandom は購読(Firestore)に依存するため、この検証の対象外として
+ * 呼び出し可能な no-op に差し替える(restoreRandom が role: "start" のとき
+ * 呼び出すが、購読の中身自体は他のテストの対象ではない)。
+ */
+export function createRandomTab({ localStorage, locks, roomId = "room-1", role = "start" }) {
+  const appSrc = readSource("js/app.js");
+  const randomKey = extractConst(appSrc, "RANDOM_KEY");
+  const names = ["mutateRandom", "restoreRandom", "validateRandomItems", "readRandomSets", "catalogName", "randomMessage"];
+  const bodies = names.map((name) => extractFunction(appSrc, name));
+
+  const elStore = Object.create(null);
+  const el = (id) => (elStore[id] ??= {});
+
+  const wrapped = `
+    (function () {
+      const RANDOM_KEY = ${randomKey};
+      const state = { roomId: ${JSON.stringify(roomId)}, role: ${JSON.stringify(role)} };
+      let randomMode = "free";
+      let randomBatch = null;
+      let randomSnapshot = null;
+      let randomRecord = undefined;
+      let stopRandom = null;
+      ${bodies.join("\n\n")}
+      return {
+        mutateRandom, restoreRandom, validateRandomItems, readRandomSets,
+        get randomBatch() { return randomBatch; },
+        get randomSnapshot() { return randomSnapshot; },
+        get randomMode() { return randomMode; },
+        set roomId(value) { state.roomId = value; },
+        get lastMessage() { return elStore["random-message"] ? elStore["random-message"].textContent : undefined; },
+      };
+    })()
+  `;
+
+  const sandbox = {
+    $: el,
+    elStore,
+    localStorage,
+    navigator: { locks },
+    watchRandom: () => {},
+    console,
+  };
   vm.createContext(sandbox);
   return vm.runInContext(wrapped, sandbox);
 }

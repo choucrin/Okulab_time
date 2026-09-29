@@ -34,7 +34,21 @@ export function extractFunction(source, functionName) {
   const match = signature.exec(source);
   if (!match) throw new Error(`関数 ${functionName} が見つかりません。`);
   const start = match.index;
-  const braceOpenRel = source.indexOf("{", start);
+  // 仮引数リストが分割代入(例: `{ existingOnly = false } = {}`)を含むと、
+  // その中の `{` を本体の開始と誤認する。まず括弧の対応で仮引数リストの
+  // 終わりを特定してから、本体の `{` を探す。
+  const parenOpen = source.indexOf("(", start);
+  if (parenOpen === -1) throw new Error(`関数 ${functionName} の仮引数リストが見つかりません。`);
+  let parenDepth = 0;
+  let paramsEnd = parenOpen;
+  for (; paramsEnd < source.length; paramsEnd++) {
+    if (source[paramsEnd] === "(") parenDepth++;
+    else if (source[paramsEnd] === ")") {
+      parenDepth--;
+      if (parenDepth === 0) { paramsEnd++; break; }
+    }
+  }
+  const braceOpenRel = source.indexOf("{", paramsEnd);
   if (braceOpenRel === -1) throw new Error(`関数 ${functionName} の本体開始が見つかりません。`);
   let depth = 0;
   let i = braceOpenRel;

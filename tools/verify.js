@@ -155,6 +155,25 @@ check("Firestore ルールと送信フィールド", () => {
     must(extra.length === 0, `更新処理 #${i + 1} が許可外のフィールドを送信: ${extra.join(", ")}`);
   }
 
+  // ランダム判定は終了更新とは独立した許可リストと照合する。
+  const outcomeAllow = lists.find((list) => list.length === 1 && list[0] === "randomOutcome");
+  must(outcomeAllow, "ランダム判定専用の許可リストがありません");
+  const outcomeBlock = store.match(/tx\.update\(target, \{([^}]+)\}\);/);
+  must(outcomeBlock, "ランダム判定の更新処理がありません");
+  const outcomeFields = [...outcomeBlock[1].matchAll(/(\w+):/g)].map((match) => match[1]);
+  must(outcomeFields.length === 1 && outcomeFields[0] === outcomeAllow[0],
+    "ランダム判定で専用項目以外を更新しています");
+
+  // 開始受領記録は計測記録と同時に保存し、削除後も保持する。
+  const receiptRules = rules.match(/match \/rooms\/\{roomId\}\/startReceipts\/\{sessionId\} \{([\s\S]*?)\n    \}/)?.[1];
+  must(receiptRules, "開始受領記録のルールがありません");
+  const receiptBlock = store.match(/tx\.set\(receipt, \{([^}]+)\}\)/);
+  must(receiptBlock, "開始受領記録の書き込みがありません");
+  const receiptFields = [...receiptBlock[1].matchAll(/(\w+):/g)].map((match) => match[1]);
+  must(receiptFields.length === 1 && receiptFields[0] === "startedBy"
+    && receiptRules.includes("hasOnly(['startedBy'])"), "開始受領記録のフィールドが不一致です");
+  must(receiptRules.includes("allow update, delete: if false;"), "開始受領記録の変更・削除は禁止が必要です");
+
   // 排他制御ドキュメントに書き込むキー
   const metaBlocks = [...store.matchAll(/tx\.set\(cur, \{([\s\S]*?)\}\)/g)]
     .map((m) => [...m[1].matchAll(/(\w+):/g)].map((x) => x[1]));
