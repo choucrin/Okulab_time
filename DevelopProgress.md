@@ -303,3 +303,45 @@ R1-002を修正しました。開始記録と受領記録を同時保存し、�
 - 未検証: 実ブラウザでの通信断・再読み込み・削除競合
 - 未検証: iPhone/iPad実機確認
 - 未検証: 修正候補のReview3周と独立Test工程
+
+## 2026-09-29 Development — cycle-3 / テスト追加後の工程確認
+
+- 記録ID: d9a671c0-04c7-46a3-be72-39a6d647d384:develop:cycle-3
+- 実行ID: d9a671c0-04c7-46a3-be72-39a6d647d384。担当工程: Development / Codex。
+- 対象コミット・HEAD: 4ad2162356de2fb25f5bb904221ddc0cfacfc9f3（一致確認済み、detached HEAD）。開始コミット: 0a18614a804ef3c3439fd9b286d6b8fdbb26fa05。
+- 作業場所: 本実行のdevelop-cycle-3 worktree。開始時の未コミット差分なし。成果物はDevelopProgress.mdへの本記録のみ。コミット・引き継ぎは管理側が実施する。
+
+### 判断と対応
+
+- TASKS.md、RSD.md、Review.md、Test.mdと直前の引き継ぎを確認した。直前の指摘は、Test工程で追加・変更したテストコードに対するReview 3周の未実施であり、アプリ本体の修正要求はない。
+- 最後のReview終了後の06a278858cc21fac538ebebe76dbfb35e77e4803から対象HEADまでの差分は、Test.mdとtest/random.test.mjs、test/store-random.test.mjs、test/support/extract-app-functions.mjs、test/support/sandbox.mjsのみ。f2474969dc1912756a7657f8bece3cc6d8b5ee13から対象HEADまではTest.mdの追記のみである。
+- 実装修正・テスト変更は行わない。バージョンは本依頼の初回実装で更新済みのv.03.0を維持する。同一依頼の工程確認のみで増分を作らず、版数一致を必須チェックで再確認した。
+- ReviewはDevelopmentと別セッションで行う規約のため、本工程で再レビューを代行しない。指摘は未解決の工程事項として管理側へ引き継ぐ。
+
+### 開発確認
+
+- `node tools/verify.js`: 終了コード0、9項目成功、v.03.0一致。
+- `node --test`: 終了コード0、64件成功、失敗・中断・スキップ0。
+- `git diff --check`: 終了コード0（本記録追記後に確認）。
+- TASKS.md / RSD.md / Review.md / Test.mdは未変更。アプリ本体・テストコードも未変更。
+- commit・checkout・reset・merge・push、別CLI起動、公開・配信・課金は実施していない。
+
+### 管理側への引き継ぎ
+
+- 次の担当: 別セッションのCodex Review。テスト変更を含む対象HEADと本記録の候補を管理側で固定し、Reviewを3周実施すること。工程未実施という指摘を実装修正要求として再度Developmentへ戻す必要はなく、まずReviewへ進める。レビュー後は規約に従いClaude Code Testで候補を再確認する。
+- 必須checksは全件成功したが、これはDevelopment工程の確認結果であり、Review完了・PR提出条件の全面充足を示さない。記録のみであり、送達・次工程の起動は行っていない。
+- 未検証: 追加・変更されたテストコードのReview 3周。
+- 未検証: 実ブラウザ操作・CSV保存・通信断復旧・複数タブ、Firebase実環境のルール評価・2端末同期・削除競合、iPhone/iPad実機、watchRandomの統合検証、およびA-1・A-2・A-9・A-11・A-12・A-13の実地確認。直前のユーザ引き継ぎとTest.mdに従い今回のPR提出に限り必須条件から除外されているため、実機待ちによるblockedとはしない。成功扱いにはせずPR本文にも明記すること。
+- Firebase Hostingの設定確認・必要な設定とデプロイは、ユーザによるマージ後の別途承認付きセッションへ引き継ぐ。
+
+<!-- devflow:d9a671c0-04c7-46a3-be72-39a6d647d384:develop:1:4ad2162356de2fb25f5bb904221ddc0cfacfc9f3 -->
+
+
+## 2026-09-29T01:25:06.802219+00:00 / develop / 周回1
+実行ID: d9a671c0-04c7-46a3-be72-39a6d647d384
+対象コミット: 4ad2162356de2fb25f5bb904221ddc0cfacfc9f3
+
+Development工程を完了し、DevelopProgress.mdを更新しました。直前の指摘はテストコードのReview未実施であり、実装修正は不要です。依頼単位で更新済みのv.03.0を維持しました。変更禁止の4文書は未変更、必須checksはすべて成功しました。管理側で別セッションのReviewへ進めてください。
+- issue: 追加・変更されたテストコードに対するReview 3周が未実施です。Developmentでは代行せず、管理側によるReview工程への引き継ぎを記録しました。PR提出前に完了が必要です。
+- 未検証: 追加・変更されたテストコードのReview 3周。
+- 未検証: 実ブラウザ操作、Firebase実環境のルール評価・2端末同期、iPhone/iPad実機確認、watchRandom統合検証、関連するA-1・A-2・A-9・A-11・A-12・A-13の実地確認。今回のPR提出に限り必須条件から除外済みですが、未検証です。
