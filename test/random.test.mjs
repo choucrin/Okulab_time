@@ -104,9 +104,9 @@ describe("F-9-12: 記録の方式・判定表示(randomOutcomeText/randomRecordT
     assert.equal(randomOutcomeText({ mode: "random", randomOutcome: null }), "未確定");
   });
 
-  test("ランダム方式の記録表示にバッチ識別子を含む(A-12/A-13のバッチ区別)", () => {
+  test("ランダム方式の記録表示にバッチ識別子を含めない(F-10-9)", () => {
     const text = randomRecordText({ mode: "random", randomBatchId: "batch-xyz", randomOutcome: "confirmed" });
-    assert.match(text, /batch-xyz/);
+    assert.doesNotMatch(text, /batch-xyz/);
     assert.match(text, /有効/);
   });
 });

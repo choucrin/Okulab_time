@@ -85,8 +85,13 @@ check("HTML の id と JS の参照", () => {
   const missing = [...jsIds].filter((id) => !htmlIds.has(id));
   must(missing.length === 0, `JS が参照するが HTML に無い id: ${missing.join(", ")}`);
 
-  const unused = [...htmlIds].filter((id) => !jsIds.has(id));
-  must(unused.length === 0, `HTML にあるが JS が参照しない id: ${unused.join(", ")}`);
+  // 支援技術向けの参照も利用として扱い、参照先の存在を検証する。
+  const ariaIds = new Set([...html.matchAll(/\saria-(?:labelledby|describedby)="([^"]+)"/g)]
+    .flatMap((m) => m[1].trim().split(/\s+/)));
+  const missingAria = [...ariaIds].filter((id) => !htmlIds.has(id));
+  must(missingAria.length === 0, `ARIA が参照するが HTML に無い id: ${missingAria.join(", ")}`);
+  const unused = [...htmlIds].filter((id) => !jsIds.has(id) && !ariaIds.has(id));
+  must(unused.length === 0, `HTML にあるが JS・ARIA が参照しない id: ${unused.join(", ")}`);
 
   return `${jsIds.size} 個が一致`;
 });

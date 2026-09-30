@@ -635,3 +635,66 @@ button:focus-visible {
 #random-progress { padding: 12px 0; line-height: 1.8; overflow-wrap: anywhere; }
 #random-confirm .btn { min-width: 88px; min-height: 44px; }
 #random-message:empty { display: none; }
+
+/* v.03.1 計測者のインセットグループ。被験者画面の寸法は維持する。 */
+#panel-start { --start: #187a4c; --accent: #245dc9; }
+#panel-start .btn { background: var(--surface-2); color: var(--accent); }
+#panel-start .btn--danger { color: var(--end); }
+#panel-start .catalog, .random-presets {
+  background: var(--surface); border-radius: 16px; padding: 16px;
+  border: 1px solid var(--border);
+}
+#panel-start .catalog fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+#panel-start summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
+#panel-start input:not([type="checkbox"]), #panel-start select {
+  width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit;
+}
+#panel-start select:focus-visible, #panel-start summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px;
+}
+.mode-switch {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: var(--surface); border-radius: 16px; padding: 14px 16px; min-height: 64px;
+  font-weight: 600; cursor: pointer;
+}
+.mode-switch__hint { display: block; color: var(--text-dim); font-size: .8rem; font-weight: 400; }
+#measurement-mode {
+  appearance: none; -webkit-appearance: none; flex: none; width: 56px; height: 44px;
+  margin: 0; border: 0; border-radius: 22px; background: var(--text-dim);
+  position: relative; cursor: pointer;
+}
+#measurement-mode::after {
+  content: ""; position: absolute; width: 26px; height: 26px; top: 9px; left: 5px;
+  border-radius: 50%; background: #fff; transition: transform .15s ease;
+}
+#measurement-mode:checked { background: var(--start); }
+#measurement-mode:checked::after { transform: translateX(20px); }
+#measurement-mode:disabled { opacity: .5; cursor: not-allowed; }
+#random-open { width: 100%; margin-top: 12px; text-align: left; }
+#random-settings { border-block: 3px solid var(--border); margin-block: 20px; }
+#random-settings h2 { padding-bottom: 14px; border-bottom: 1px solid var(--border); font-size: 1.15rem; }
+#random-total { border-top: 1px solid var(--border); padding-top: 16px; font-weight: 700; }
+.random-presets { margin-top: 12px; }
+.random-presets .field { margin-bottom: 10px; }
+.random-item { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-block: 12px; background: var(--surface-2); }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 8px; }
+.tag-chip { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 6px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.tag-chip small { color: var(--text-dim); font-size: .75rem; }
+.tag-chip strong { color: var(--text); font-size: .95rem; }
+#random-progress { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.trial-section { border-radius: 14px; padding: 14px; background: var(--surface); border: 1px solid var(--border); }
+.trial-section h3 { margin: 0 0 8px; color: var(--text-dim); font-size: .85rem; font-weight: 600; }
+.trial-section--next { border: 2px solid var(--accent); font-size: 1.3rem; font-weight: 700; }
+.trial-section--next h3 { color: var(--accent); }
+#random-confirm { padding: 20px; margin-block: 16px; border: 2px solid var(--accent); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); text-align: center; }
+#random-confirm p { margin: 0 0 16px; font-size: 1.15rem; font-weight: 700; }
+#random-confirm #random-yes { background: var(--accent); color: #fff; }
+#screen-main .btn--sm, #screen-main .del { min-height: 44px; min-width: 44px; }
+@media (min-width: 540px) {
+  #random-progress { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+}
+@media (prefers-color-scheme: dark) {
+  #panel-start { --accent: #9bbaff; --start: #2fbe7c; }
+  #random-confirm #random-yes { color: #141d2e; }
+}
