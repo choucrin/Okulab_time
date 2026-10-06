@@ -5,11 +5,11 @@
 
 ```devflow
 {
-  "delivery_mode": "push",
+  "delivery_mode": "pull_request",
   "base_branch": "main",
   "pr_events_reviewed": true,
   "preview_deployments": "deny",
-  "after_merge": "none",
+  "after_merge": "agent",
   "deployment_tasks": ["Firebase Hostingの配信設定を確認し、必要な設定とデプロイを行う"],
   "pr_title": ""
 }
