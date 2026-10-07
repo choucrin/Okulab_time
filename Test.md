@@ -721,3 +721,61 @@ E2E の失敗 6 件はすべて横幅判定(T-v032-001)。iphone-portrait・ipho
 - 未検証: Firebase実環境でのルール評価と同期遅延。E2Eはインメモリのスタブで代替しました。
 - 未検証: 一括削除・1件削除のE2E（今回の変更範囲外）。
 - 未検証: T-v032-001修正後の再Review 3周と再テスト。
+
+## 2026-10-07 / test / 再テスト(v.03.2・T-v032-001 修正後)
+
+- 実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+- 対象コミット: 1d5136d8cd0fee02a87aec54e39dcfcf16aef8e6(開始コミット 5b56b60561af418bd180b681ccb59e22f236a4e9)
+- 環境: WSL2 Ubuntu(Linux 6.18)、Node.js v24.21.0、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。iPhone・iPad・Windows 実機なし
+- 参照: RSD.md F-11・A-24〜A-29・7-3、Review.md(90667b0 / f815cb0 / ad285ea で 3 周完了、指摘 0 件)
+- 前回からのアプリ差分: `css/style.css` の `.status__meta` に `overflow-wrap: anywhere` を追加(T-v032-001 の修正)。`html`/`body` の `overflow-x: hidden`・ズーム禁止による回避ではないことを確認
+- テストコード・設定の変更: **なし**(前回追加した `test/records-v032.test.mjs`・`e2e/` 一式をそのまま再実行。Test.md への本記録の追記のみ)
+
+### 実行コマンドと結果(対象コミットの作業ツリーそのまま)
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功(v.03.2 一致を含む) |
+| `node --test` | 0 | 120件成功(既存 102 + F-11 追加 18)、失敗・スキップ・中断 0。ログ: /tmp/okulab-bae93ebe-test2-node.log |
+| `devflow-browser` | 0 | 36件すべて成功(6 条件 × 6 件。expected 36 / unexpected 0 / skipped 0 / flaky 0)。Firebase はスタブ(本番接続なし、127.0.0.1 以外への要求 0 件を各テストで検査)。成果物: /tmp/okulab-bae93ebe-test-2-browser(results.json、html/index.html、test-results)。ログ: /tmp/okulab-bae93ebe-test2-e2e.log |
+| `git diff --check` | 0 | 成功 |
+
+T-v032-001 で失敗していた iphone-portrait・iphone-320 の「記録一覧(2 条件)」「終了担当・閲覧のみ」の 6 件は、同じテストのまま成功した(長い英数字ラベルを含む状態で html/body の scrollWidth が innerWidth 以内)。
+
+### 指摘事項
+
+- 重要項目: 0件。指摘項目: 0件(T-v032-001 は解消を確認)。軽微項目: 新規 0件(過去の T1-001〜T1-004 は残存)。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows(Edge/Chrome)実機での記録操作と表示(A-29)。ユーザ指示により PR 提出の必須条件から除外し、ユーザが後日実施する。WebKit / Chromium の結果は Ubuntu 上のエミュレーションであり、実機合格ではない。確認項目: 右余白なし・最小縮小時に右半分が空白にならない、列順、色→パターン順、1行表示、開始→終了→一覧反映。
+- iOS 実機固有の挙動(ピンチ縮小の最小倍率、アドレスバーの伸縮、PWA 表示)。
+- Firebase 実環境(ルール評価・同期遅延)。E2E はスタブで代替(ルール・送信フィールドは F-11 で変更なし)。
+- 一括削除・1件削除の E2E(変更範囲外)。
+
+### 結論
+
+合格。必須チェック 4 件をすべて実行・成功し、A-24〜A-28 を自動検証で満たした。Review・Test の未解決の重要項目・指摘項目は 0 件。テストコード・設定の変更は無いため再レビューは不要。A-29(実機確認)はユーザ指示どおり未検証として PR 本文に明記すること。
+
+<!-- devflow:bae93ebe-9c79-481d-9bea-d5e6756cb798:test:3:1d5136d8cd0fee02a87aec54e39dcfcf16aef8e6 -->
+
+
+## 2026-10-07T01:46:52.431341+00:00 / test / 周回3
+実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+対象コミット: 1d5136d8cd0fee02a87aec54e39dcfcf16aef8e6
+
+1d5136dを再テストし、判定は合格です。必須チェック4件はすべて成功しました。
+- node tools/verify.js: 9項目すべて成功（版数v.03.2の一致を含む）
+- node --test: 120件成功。失敗・スキップ・中断は0件
+- devflow-browser: 36件すべて成功（WebKitのiPhone 13縦横・iPad Pro 11縦横・幅320px、Chromium）。skipped・flakyは0件
+- git diff --check: 成功
+
+前回の指摘T-v032-001（長い英数字ラベルでページが横にはみ出す）は解消しました。修正は.status__metaにoverflow-wrap: anywhereを追加したもので、overflow-x: hiddenやズーム禁止による回避ではありません。前回失敗した6件も、同じテストのまま成功しました。
+
+E2EのFirebaseはスタブです。本番には接続しておらず、外部への要求は0件でした。成果物は/tmp/okulab-bae93ebe-test-2-browserにあります。
+
+テストコードと設定は変更していません。変更はTest.mdへの今回の結果の追記だけなので、再レビューは不要です。Review・Testで未解決の重要項目・指摘項目は0件です。
+- 未検証: iPhone（iOS Safari）・iPad（iPadOS Safari）・Windows（Edge/Chrome）実機での記録操作と表示（A-29）。ユーザ指示によりPRの必須条件から外し、後日ユーザが実施します。Ubuntu上のWebKit/Chromiumの結果は実機合格を意味しません。
+- 未検証: iOS実機固有の挙動（ピンチで最小まで縮小したときの表示、アドレスバーの伸縮、PWA表示）。
+- 未検証: Firebase実環境でのルール評価と同期遅延。E2Eはインメモリのスタブで代替しました。
+- 未検証: 一括削除・1件削除のE2E（今回の変更範囲外）。
