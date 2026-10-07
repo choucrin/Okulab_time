@@ -16,7 +16,7 @@ import {
   decideRandomSession, subscribeRandomSession,
 } from "./store.js";
 
-export const APP_VERSION = "v.03.1";
+export const APP_VERSION = "v.03.2";
 
 const CATALOG_KEY = "okulab-time/catalog";
 let catalog = [];
@@ -1072,12 +1072,12 @@ function renderRecords() {
 
     tr.append(
       cell(s.label || "—", "label-cell", s.label || ""),
+      durationCell(s),
       tagCell(s.tags ?? []),
       cell(randomRecordText(s)),
       cell(formatClock(s.startMs), "mono", formatFull(s.startMs)),
       cell(s.status === "running" ? "—" : formatClock(s.endMs), "mono",
-           typeof s.endMs === "number" ? formatFull(s.endMs) : ""),
-      durationCell(s)
+           typeof s.endMs === "number" ? formatFull(s.endMs) : "")
     );
 
     const td = document.createElement("td");
@@ -2347,13 +2347,29 @@ function sortTags(tags) {
     - (order.get(b.split(":")[0]) ?? catalog.length));
 }
 
-function tagChips(tags, empty = "ラベルなし") {
+// 記録表示専用。端末カタログや保存順に依存せず、保存配列は変更しない。
+function sortRecordTags(tags) {
+  const key = (tag) => {
+    const split = tag.indexOf(":");
+    return (split < 0 ? tag : tag.slice(0, split))
+      .replace(/%(25|3A|3B|0D|0A)/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .normalize("NFC");
+  };
+  const rank = (genre) => genre === "色" ? 0 : genre === "パターン" ? 1 : 2;
+  const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+  return [...tags].sort((a, b) => {
+    const ka = key(a), kb = key(b);
+    return rank(ka) - rank(kb) || compare(ka, kb) || compare(a, b);
+  });
+}
+
+function tagChips(tags, empty = "ラベルなし", sorter = sortTags) {
   const group = document.createElement("div");
   group.className = "tag-chips";
   if (!tags?.length) { group.textContent = empty; return group; }
   const decode = (text) => text.replace(/%(25|3A|3B|0D|0A)/gi,
     (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-  for (const tag of sortTags(tags)) {
+  for (const tag of sorter(tags)) {
     const chip = document.createElement("span");
     chip.className = "tag-chip";
     const split = tag.indexOf(":");
@@ -2369,7 +2385,7 @@ function tagChips(tags, empty = "ラベルなし") {
 
 function tagCell(tags) {
   const result = cell("", "tags-cell");
-  result.append(tagChips(tags, "—"));
+  result.append(tagChips(tags, "—", sortRecordTags));
   return result;
 }
 

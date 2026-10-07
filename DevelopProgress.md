@@ -432,3 +432,86 @@ R1-001・R1-002・R2-001を修正し、DevelopProgress.mdを更新しました�
 - 未検証: 実ブラウザ・支援技術での読み上げ、フォーカス、スクロール、表示位置とiPhone/iPad実機確認。
 - 未検証: Firebase実環境での複数端末競合。
 - 未検証: 修正候補のReview 3周と独立Testは管理側の後続工程です。
+
+## 2026-10-07 / Development / v.03.2（F-11）
+
+- 実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+- 対象コミット: fad7fedbface120b3aeb37ffd1d02779f60be0f3
+- 開始コミット: 5b56b60561af418bd180b681ccb59e22f236a4e9
+- 作業場所: 本実行の develop-cycle-0 worktree
+- 次の担当: 管理側による候補確定 → Codex Review（別セッション3周）→ Claude Code Test
+- 状態: Development の実装完了。必須検証全体の合格・PR提出完了ではない。
+
+### 実装と判断
+
+- F-11-1: 実アプリのHTML/CSSからscriptを除き、外部接続のない一時Playwrightスクリプトで実測。幅320pxで修正前のhtml.scrollWidthはWebKit=438px、Chromium=435px（body=320px）。表の末尾見出しの `.sr-only` は絶対配置で、見出しセルが配置基準でないため、表内スクロールからページ全体へはみ出していた。`.table th` に `position: relative` を指定し、表内を配置基準にした。修正後は両エンジンでhtml/bodyとも320px。fieldsetの候補だけが原因と断定しなかった。
+- ランダム設定のfieldsetにmin-width:0/max-width:100%/overflow-wrap:anywhereを指定し、長いジャンル名・内容を含め幅を制約。legend・保存済みセットの幅/折り返しも制約。記録表の親をmin-width:0/max-width:100%とした。html/bodyのoverflow隠蔽やviewportのズーム制限は追加していない。
+- F-11-2: HTML見出しとrenderRecordsのセル順を「ラベル → 経過(秒) → 選択式ラベル → 方式 / 判定 → 開始 → 終了 → 操作」に統一。durationCellの内容・警告・title・数値スタイルは維持。
+- F-11-3: 純粋関数sortRecordTagsを追加。既存tagChipsと同じ1回の復号後にジャンルキーをNFC正規化し、「色」→「パターン」→その他（UTF-16コード単位順）、同ジャンルでは保存文字列全体のコード単位順で安定整列する。入力配列はコピーし、旧形式・重複タグも残す。tagCellだけがこの整列関数をtagChipsへ渡す。カタログ順のsortTags、ランダム設定・送信、Firestore、CSV出力コードは変更していない。
+- F-11-4: `.tags-cell` 内だけチップ群をnowrap、チップを横方向/nowrapにし、上下余白を縮小。3タグ以上でも表内横スクロールで確認可能。
+- F-11-5: js/app.js、index.html、ProgressReport.md、RegacyReview.mdの現行版数をv.03.2に同期。RegacyReview.mdは現行版数欄のみで、レビュー結果は追記していない。
+- 既存test/acceptance-v031.test.mjsの関数抽出ハーネスに新依存sortRecordTagsを追加し、仕様変更された記録表示順の期待値のみ改訂。カタログ順で送信する検証等は維持。独立したF-11追加テストとE2E作成はTest担当へ引き継ぐ。
+
+### Development の動作確認
+
+- `node tools/verify.js`: 終了コード0、9項目成功（v.03.2一致含む）。
+- `node --test`: 終了コード0、102件成功、失敗/skip 0。ログ: /tmp/okulab-node-tests.log。F-11追加テストは未作成。
+- `git diff --check`: 終了コード0。
+- `devflow-browser`: 終了コード1。e2e/playwright.config.cjsが存在しないため設定読込時点で終了。アプリE2Eの成功・失敗結果ではなく未実施扱い。
+- 原因調査: `PLAYWRIGHT_BROWSERS_PATH=/home/choucrin/projects/.environment/tools/browser-testing/browsers node /tmp/okulab-layout.cjs`。一時スクリプトは/tmpにあり、アプリHTML/CSSを読んでDOM表示を再現する。ネットワーク経由のアプリ起動やFirebase操作は行わない。
+- 修正後描画確認: `PLAYWRIGHT_BROWSERS_PATH=/home/choucrin/projects/.environment/tools/browser-testing/browsers node /tmp/okulab-f11-check.cjs`（終了コード0）。実際のsortRecordTags/tagChips/tagCell/renderRecords/durationCellを抽出してブラウザ内で動かし、周辺状態・日時整形等はスタブ。WebKit/Chromiumそれぞれ320×700、375×812、390×844、844×390、834×1194、1194×834、1280×720でhtml/body幅がviewport以下、3チップのtop一致、「色」→「パターン」→「音」、経過セルが2列目で「計測中」、NFD/符号化/旧形式/重複を含む整列を確認。
+- 上記描画確認は長い40文字の英字ジャンル名・内容を持つランダム設定を含む。ログ: /tmp/okulab-f11-check.log。スクリーンショット: /tmp/okulab-f11-webkit.png、/tmp/okulab-f11-chromium.png（最終幅1280px）。一時成果物はGit対象外で、管理側の引き継ぎ後は再生成が必要になる場合がある。
+- 描画確認は開発時の部分確認であり、独立Test工程、Firebaseスタブ経由のアプリ全体E2E、iOS/iPadOS/Windows実機合格の代替ではない。
+
+### 未解決・引き継ぎ
+
+- Test担当はRSD 7-3に従い、F-11整列/入力非変更/端末カタログ非依存/列順の単体テスト、およびe2e/playwright.config.cjsと案件固有テストを作成し、devflow-browserを実行すること。任意/ランダムの開始→終了、Yes/No、中止、CSV保存順保持、全状態の幅確認は本工程の部分描画確認だけでは合格判定できない。
+- iPhone/iPad/Windows実機確認A-29は未実施。RSDとユーザ指示により今回PRの必須条件から除外され、後日ユーザが実施する。Test.mdとPR本文で未検証を明記すること。
+- TASKS.md / RSD.md / Review.md / Test.mdは変更していない。commit/checkout/reset/merge/push、別CLI起動、公開/配信/課金は実施していない。管理側がコミット・送達・工程切替を行う。本記録の作成だけで次担当への送達・作業開始を確認したとは扱わない。
+- 提出方式は固定済みpull_request/main、preview_deployments=deny。PRの承認/マージはユーザ、Firebase Hosting確認・必要設定・デプロイはマージ後の別承認セッションへ引き継ぐ。
+
+<!-- devflow:bae93ebe-9c79-481d-9bea-d5e6756cb798:develop:1:fad7fedbface120b3aeb37ffd1d02779f60be0f3 -->
+
+
+## 2026-10-07T00:41:14.722603+00:00 / develop / 周回1
+実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+対象コミット: fad7fedbface120b3aeb37ffd1d02779f60be0f3
+
+DevelopmentとしてF-11の横はみ出し、列順、固定タグ順、1行表示を実装し、版数をv.03.2へ更新しました。DevelopProgress.mdに原因・検証結果・引き継ぎを記録しました。整合性9項目、既存単体テスト102件、空白検査は成功。WebKit/Chromiumで部分的な描画確認も成功しました。
+- minor: 必須E2Eはe2e/playwright.config.cjs未作成のため実行できませんでした。設定・案件固有E2E・F-11追加単体テストの作成と実行をTest担当へ引き継ぎます。
+- 未検証: F-11追加単体テストと必須ブラウザE2E
+- 未検証: 任意・ランダム計測、Yes/No、中止、CSVの一連操作と全状態のブラウザ検証
+- 未検証: iPhone・iPad・Windows実機確認（今回PRの必須条件から除外、後日ユーザ実施）
+## 2026-10-07 / Development / T-v032-001 修正
+
+- 実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798。工程: develop。対象コミット: 9c897c362a122010bd61a50ce21ac914c0820164。開始コミット: 5b56b60561af418bd180b681ccb59e22f236a4e9。
+- T-v032-001: 空白のない長いラベルを含む状態カードの補足文が折り返されず、ページ全体の横幅を広げる指摘に対応。css/style.css の `.status__meta` に `overflow-wrap: anywhere` を追加した。計測中・直近の記録の両表示に適用し、内容を省略せず折り返す。
+- 版数: 今回はF-11の同一依頼内の修正反復であるため、RSDの指定どおり最終版数v.03.2を維持。整合性チェックで一致を確認した。
+- 変更範囲: css/style.css と本開発記録のみ。TASKS.md、RSD.md、Review.md、Test.md、既存の単体/E2Eテストは変更していない。
+
+### 担当実装の動作確認
+
+- `node tools/verify.js`: 終了コード0。版数v.03.2一致を含む9項目成功。
+- `node --test`: 終了コード0。120件成功、失敗・スキップ0。
+- `DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-bae93ebe-develop-cycle-1-browser devflow-browser`: 終了コード0。36件すべて成功（9.6分）。WebKitのiPhone/iPad相当の縦横、幅320px、Desktop Chromium。前回失敗した長いラベルを含む記録一覧2条件・終了担当/閲覧画面の計6件も成功。
+- E2Eは既存の案件固有テストを使用。Firebase SDKをインメモリのローカルスタブに置換し、autoフィクスチャで外部通信を遮断。外部要求の判定を含め成功した。本番サービスへの書き込みなし。
+- 成果物: `/tmp/okulab-bae93ebe-develop-cycle-1-browser/results.json`、`html/index.html`、`test-results/`（スクリーンショット・trace）。
+- `git diff --check`: 終了コード0。本記録更新後にも再確認。
+
+### 管理側への引き継ぎ
+
+- 次の担当: Review。上記修正とTestが追加済みのtest/records-v032.test.mjs・e2e一式を含む候補を固定し、3周レビュー後にClaude CodeのTestで再検証すること。本確認はDevelopmentの動作確認であり独立したTest工程の代替ではない。
+- 修正コミットID・ブランチの引き継ぎは管理側が確定する。本工程ではcommit、checkout、reset、merge、push、別CLI起動、公開・配信・課金の操作を行っていない。
+- 未検証: iOS/iPadOS・Windows実機（A-29は今回PRの必須条件から除外、後日ユーザ実施）、iOS固有のズーム/アドレスバー/PWA挙動、Firebase実環境のルール評価・同期遅延、一括/1件削除のE2E。Ubuntu上のエミュレーションを実機合格とは扱わない。
+
+<!-- devflow:bae93ebe-9c79-481d-9bea-d5e6756cb798:develop:1:9c897c362a122010bd61a50ce21ac914c0820164 -->
+
+
+## 2026-10-07T01:21:21.340863+00:00 / develop / 周回1
+実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+対象コミット: 9c897c362a122010bd61a50ce21ac914c0820164
+
+T-v032-001を修正しました。.status__metaにoverflow-wrap: anywhereを追加し、長いラベルによる横幅超過を解消しました。v.03.2を維持し、DevelopProgress.mdを更新しました。指定4チェックはすべて成功しました。変更はCSSと開発記録のみです。
+- 未検証: 修正候補のReview 3周と独立したTest工程は管理側へ引き継ぎます。
+- 未検証: iOS・iPadOS・Windows実機確認は後日ユーザ実施です。Ubuntuのエミュレーションを実機合格とは扱いません。
+- 未検証: iOS固有のズーム・アドレスバー・PWA挙動、Firebase実環境のルール評価・同期遅延、削除操作のE2Eは未検証です。
