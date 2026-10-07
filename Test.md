@@ -624,3 +624,100 @@ firestore.rules・js/store.js は開始コミットから差分なしを再確�
 - 未検証: Firebase実環境でのルール評価、複数端末の同期、購読の競合（RSD 7-2では任意）。
 - 未検証: コントラストはCSSの色の組み合わせから計算しただけで、opacityや実際の描画は評価していません。
 - 未検証: 統合確認とPR作成（管理側の工程）。
+
+## 2026-10-07 / test / 周回1(v.03.2・F-11)
+
+- 実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+- 対象コミット: 040ef5923432107142047299f7f12b3f29dbfc69(開始コミット 5b56b60561af418bd180b681ccb59e22f236a4e9)
+- 環境: WSL2 Ubuntu(Linux 6.18)、Node.js v24.21.0、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。iPhone・iPad・Windows 実機なし
+- 参照: RSD.md F-11・A-24〜A-29・7-3、Review.md(a9cb1c2 まで 3 周完了。実装不具合の指摘 0 件、R1-001 は E2E 未作成の申し送り)
+
+### 追加したテストコード・設定(再レビュー対象)
+
+| ファイル | 内容 |
+|---|---|
+| `test/records-v032.test.mjs` | 単体 18 件。js/app.js の実関数を抽出して vm で実行。F-11-3 `sortRecordTags`(逆順保存・片方のみ・空・その他ジャンルのコード単位順・旧形式・`%3A`/`%3a` 復号・NFD「パターン」・重複・入力非変更・全順列で同一結果・カタログ無し/パターン→色/色→パターンで同一結果・`sortTags` はカタログ順のまま)、F-11-2(`<thead>` と `renderRecords` のセル順の一致、経過セルの num/warn/bad、CSV 列の不変)、F-11-1(viewport のズーム禁止・html/body の overflow 隠蔽が無いこと) |
+| `e2e/playwright.config.cjs` | 共通雛形を基に作成。5 条件(iPhone 13 縦横・iPad Pro 11 縦横=WebKit、Desktop Chrome=Chromium)に幅 320px の `iphone-320`(iPhone SE 相当・WebKit)を追加。timeout 60 秒 |
+| `e2e/support/harness.cjs` | 127.0.0.1 の静的サーバ(ワーカー単位で起動・停止)、Firebase SDK の差し替え、127.0.0.1 以外への通信の遮断(auto フィクスチャ)、データ投入・CSV 解析 |
+| `e2e/stubs/firebase-{app,auth,firestore}.mjs` | **Firebase はスタブ方式**(Emulator は不使用)。gstatic の SDK 12.17.0 を `context.route` でインメモリ実装へ差し替え。データは同一ブラウザコンテキストの localStorage に置き、開始端末・終了端末役の 2 ページで共有。セキュリティルールは評価しない |
+| `e2e/okulab-time.spec.cjs` | 案件固有 E2E 6 件 × 6 条件 = 36 件(下表) |
+
+| E2E | 対応 |
+|---|---|
+| 記録一覧の列順・表示順・1行表示と CSV の保存順(カタログ無し / パターン→色カタログの 2 条件) | A-25・A-26・A-27・F-11-1(長いラベル・長いジャンル名を含む記録 8 件) |
+| 計測者画面の全状態でページ全体が画面幅を超えない | A-24(記録0件、カタログ編集、ランダム方式、設定ページ、項目追加、保存済みセット、実行中バッチ、設定再表示。iphone-portrait では 375px でも判定) |
+| 任意方式の開始→終了→一覧反映と中止(2 ページ) | A-28(経過秒数、列位置、送信 tags はカタログ順のまま、中止、CSV) |
+| ランダム方式の開始→終了→Yes/No 確認後の一覧表示 | A-28・A-26(保存はパターン→色、表示は色→パターン、CSV は保存順)。計測後確認表示中の横幅も判定 |
+| 終了担当・閲覧のみの画面 | A-24(記録多数) |
+
+各テストで 127.0.0.1 以外への要求が 0 件であることも検査している。
+
+### 実行コマンドと結果(対象コミット + 上記テスト追加後の作業ツリー)
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功(v.03.2 一致を含む) |
+| `node --test` | 0 | 120件成功(既存 102 + 追加 18)、失敗・スキップ・中断 0。ログ: /tmp/okulab-node-test-v032.log |
+| `devflow-browser` | 1 | 36件中 30 成功・6 失敗。成果物: /home/choucrin/projects/.automation-runs/browser-artifacts/de08c40522a78baa4933(results.json、html/index.html、test-results 内のスクリーンショット・trace.zip)。ログ: /tmp/okulab-e2e-v032.log |
+| `git diff --check` | 0 | 成功 |
+
+E2E の失敗 6 件はすべて横幅判定(T-v032-001)。iphone-portrait・iphone-320 の「記録一覧(2 条件)」「終了担当・閲覧のみ」で `html.scrollWidth = body.scrollWidth = 608px`(innerWidth 390 / 320)。同じテスト内の列順・表示順・1行表示・CSV の判定は全条件で成功。iphone-landscape・iPad 縦横・Chromium は全件成功。
+
+検出力の確認: 開始コミット 5b56b60(修正前)を /tmp に展開して同じ E2E を実行し(iphone-320・desktop-chromium)、全状態の横幅(iphone-320)・列順・版数等で失敗することを確認した(検証用の一時実行。リポジトリは変更していない)。
+
+### 指摘事項
+
+- **指摘項目 T-v032-001(A-24 / F-11-1 不適合)**: 空白を含まない長い英数字ラベル(例: 80 文字)の記録があると、状態カードの `#status-meta`(「直近の記録: X 秒(ラベル)」/ 計測中の「HH:MM:SS 開始 — ラベル」)が折り返されず(`overflow-wrap: normal`)、ページ全体が画面幅より広くなる(WebKit 390px・320px で 608〜650px)。RSD F-11-1 は「長いラベル」を判定対象の状態に含めている。原因はテキストノードの外接矩形で特定(他のはみ出し要素なし)。`.status__meta { overflow-wrap: anywhere; }` を一時注入すると 320px で html/body=320px に収まることを確認済み(修正方針の参考。アプリ本体は変更していない)。日本語のラベルは文字間で折り返されるため通常は発生しないが、英数字の長い識別子では発生する。Development での修正を依頼する。
+- 重要項目: 0件。軽微項目: 0件(過去の T1-001〜T1-004 は残存)。
+
+### 作業中の事象(記録)
+
+- 原因調査用に一時作成した診断 spec(作成後に削除済み・候補に含まない)の最初の実行で、Firebase 差し替えのフィクスチャを参照しておらず、遮断が適用されないまま本番 Firebase Auth への匿名認証要求が 1 回発生した。応答はリファラ制限による拒否(`auth/requests-from-referer-http://127.0.0.1:...-are-blocked`)で、認証は成立しておらず Firestore への読み書きは発生していない。以後、遮断を auto フィクスチャに変更し、テストが参照しなくても必ず適用されるようにした。正式な E2E 実行では全テストで外部要求 0 件。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows(Edge/Chrome)実機での記録操作と表示(A-29)。ユーザ指示により今回の PR 提出の必須条件から除外し、ユーザが後日実施する。本記録の WebKit / Chromium 結果は Ubuntu 上のエミュレーションであり、実機合格ではない。実機での確認項目: 右余白なし・最小縮小時に右半分が空白にならない、列順、色→パターン順、1行表示、開始→終了→一覧反映。
+- iOS 実機固有の挙動(ピンチ縮小の最小倍率、アドレスバーの伸縮、PWA 表示)。
+- Firebase 実環境(ルール評価・実際の同期遅延)。E2E はスタブで代替した(ルール・送信フィールドは F-11 で変更なし)。
+- 一括削除・1件削除の E2E は今回の変更範囲外のため未作成(既存単体テストと verify で担保)。
+
+### 結論
+
+不合格。必須チェックのうち `devflow-browser` が失敗(指摘項目 T-v032-001)。Development へ T-v032-001 の修正を依頼する。今回テストコード・設定(`test/records-v032.test.mjs`、`e2e/`)を追加したため、修正後の候補は追加分を含めて Review 3 周 → Test(同じ E2E・単体テストの再実行)へ戻す。次回 Test ではテストコードの追加変更は原則不要。
+
+<!-- devflow:bae93ebe-9c79-481d-9bea-d5e6756cb798:test:3:040ef5923432107142047299f7f12b3f29dbfc69 -->
+
+
+## 2026-10-07T01:11:03.285435+00:00 / test / 周回3
+実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+対象コミット: 040ef5923432107142047299f7f12b3f29dbfc69
+
+040ef59のTestを実施し、判定は不合格です。必須4件のうち3件は成功し、devflow-browserが失敗しました（36件中30件成功、6件失敗）。
+- node tools/verify.js: 9項目すべて成功（版数v.03.2の一致を含む）
+- node --test: 120件成功（既存102件＋追加18件）、失敗・スキップは0件
+- git diff --check: 成功
+
+ブラウザE2Eの失敗6件は、すべて画面横幅の判定です。WebKitのiPhone縦（390px）と幅320pxで、空白を含まない長い英数字ラベルの記録があると、ページ全体が608pxに広がります（指摘T-v032-001）。原因は状態カードの#status-metaで、長いラベルが折り返されません。
+
+同じテスト内の列順、色→パターンの表示順、1行表示、CSVの保存順の判定は、全条件で成功しました。任意方式・ランダム方式の開始→終了、Yes/No、中止も成功です。iPhone横、iPad縦横、Chromiumは全件成功しました。
+
+修正前の開始コミット5b56b60に同じE2Eを流し、失敗することも確認しました。
+
+追加したもの（再Review対象）:
+- test/records-v032.test.mjs
+- e2e/playwright.config.cjs（5条件＋幅320pxのiphone-320）
+- e2e/support/harness.cjs
+- e2e/stubs/firebase-{app,auth,firestore}.mjs（FirebaseはEmulatorではなくスタブ）
+- e2e/okulab-time.spec.cjs
+
+結果はTest.mdに追記しました。E2E成果物は/home/choucrin/projects/.automation-runs/browser-artifacts/de08c40522a78baa4933にあります。
+
+作業中に1件、事象がありました。調査用の一時specで外部遮断が適用されず、本番Firebase Authへ匿名認証要求が1回送られました。リファラ制限で拒否されたため、認証は成立せず、Firestoreへの読み書きは発生していません。遮断はautoフィクスチャに変更して以後必ず適用されるようにし、一時specは削除済みです。この事象もTest.mdに記録しました。
+- issue: T-v032-001（A-24/F-11-1に不適合）: 空白を含まない長い英数字ラベル（例: 80文字）の記録があると、状態カードの#status-meta（「直近の記録: X 秒(ラベル)」や計測中の「… 開始 — ラベル」）が折り返されません（overflow-wrap: normal）。その結果、WebKitのiPhone 390px・320pxで、html/bodyのscrollWidthが608〜650pxに広がります。E2Eでは iphone-portrait と iphone-320 の『記録一覧（2条件）』『終了担当・閲覧のみ』の計6件が失敗しました。.status__meta { overflow-wrap: anywhere; } を一時的に注入すると320pxに収まることを確認済みです。アプリ本体は変更していないため、Developmentでの修正が必要です。
+- minor: Testでテストコードと設定を追加しました（test/records-v032.test.mjs、e2e/一式）。修正後の候補は、これらを含めてReview 3周 → Test再実行に戻す必要があります。次回のTestでテストを追加変更する必要は、原則ありません。
+- minor: 記録: 調査用の一時specで外部遮断が適用されず、本番Firebase Authへ匿名認証要求が1回送られました。リファラ制限で拒否されたため、認証は成立せず、データの読み書きはありません。遮断はautoフィクスチャに変更して再発を防止済みで、正式なE2E実行では外部要求は0件でした。
+- 未検証: iPhone（iOS Safari）・iPad（iPadOS Safari）・Windows（Edge/Chrome）実機での記録操作と表示（A-29）。ユーザ指示により今回のPRの必須条件からは除外し、後日ユーザが実施します。Ubuntu上のWebKit/Chromiumの結果は、実機合格として扱いません。
+- 未検証: iOS実機固有の挙動（ピンチで最小まで縮小したときの表示、アドレスバーの伸縮、PWA表示）。
+- 未検証: Firebase実環境でのルール評価と同期遅延。E2Eはインメモリのスタブで代替しました。
+- 未検証: 一括削除・1件削除のE2E（今回の変更範囲外）。
+- 未検証: T-v032-001修正後の再Review 3周と再テスト。
