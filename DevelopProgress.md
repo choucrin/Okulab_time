@@ -482,3 +482,36 @@ DevelopmentとしてF-11の横はみ出し、列順、固定タグ順、1行表�
 - 未検証: F-11追加単体テストと必須ブラウザE2E
 - 未検証: 任意・ランダム計測、Yes/No、中止、CSVの一連操作と全状態のブラウザ検証
 - 未検証: iPhone・iPad・Windows実機確認（今回PRの必須条件から除外、後日ユーザ実施）
+## 2026-10-07 / Development / T-v032-001 修正
+
+- 実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798。工程: develop。対象コミット: 9c897c362a122010bd61a50ce21ac914c0820164。開始コミット: 5b56b60561af418bd180b681ccb59e22f236a4e9。
+- T-v032-001: 空白のない長いラベルを含む状態カードの補足文が折り返されず、ページ全体の横幅を広げる指摘に対応。css/style.css の `.status__meta` に `overflow-wrap: anywhere` を追加した。計測中・直近の記録の両表示に適用し、内容を省略せず折り返す。
+- 版数: 今回はF-11の同一依頼内の修正反復であるため、RSDの指定どおり最終版数v.03.2を維持。整合性チェックで一致を確認した。
+- 変更範囲: css/style.css と本開発記録のみ。TASKS.md、RSD.md、Review.md、Test.md、既存の単体/E2Eテストは変更していない。
+
+### 担当実装の動作確認
+
+- `node tools/verify.js`: 終了コード0。版数v.03.2一致を含む9項目成功。
+- `node --test`: 終了コード0。120件成功、失敗・スキップ0。
+- `DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-bae93ebe-develop-cycle-1-browser devflow-browser`: 終了コード0。36件すべて成功（9.6分）。WebKitのiPhone/iPad相当の縦横、幅320px、Desktop Chromium。前回失敗した長いラベルを含む記録一覧2条件・終了担当/閲覧画面の計6件も成功。
+- E2Eは既存の案件固有テストを使用。Firebase SDKをインメモリのローカルスタブに置換し、autoフィクスチャで外部通信を遮断。外部要求の判定を含め成功した。本番サービスへの書き込みなし。
+- 成果物: `/tmp/okulab-bae93ebe-develop-cycle-1-browser/results.json`、`html/index.html`、`test-results/`（スクリーンショット・trace）。
+- `git diff --check`: 終了コード0。本記録更新後にも再確認。
+
+### 管理側への引き継ぎ
+
+- 次の担当: Review。上記修正とTestが追加済みのtest/records-v032.test.mjs・e2e一式を含む候補を固定し、3周レビュー後にClaude CodeのTestで再検証すること。本確認はDevelopmentの動作確認であり独立したTest工程の代替ではない。
+- 修正コミットID・ブランチの引き継ぎは管理側が確定する。本工程ではcommit、checkout、reset、merge、push、別CLI起動、公開・配信・課金の操作を行っていない。
+- 未検証: iOS/iPadOS・Windows実機（A-29は今回PRの必須条件から除外、後日ユーザ実施）、iOS固有のズーム/アドレスバー/PWA挙動、Firebase実環境のルール評価・同期遅延、一括/1件削除のE2E。Ubuntu上のエミュレーションを実機合格とは扱わない。
+
+<!-- devflow:bae93ebe-9c79-481d-9bea-d5e6756cb798:develop:1:9c897c362a122010bd61a50ce21ac914c0820164 -->
+
+
+## 2026-10-07T01:21:21.340863+00:00 / develop / 周回1
+実行ID: bae93ebe-9c79-481d-9bea-d5e6756cb798
+対象コミット: 9c897c362a122010bd61a50ce21ac914c0820164
+
+T-v032-001を修正しました。.status__metaにoverflow-wrap: anywhereを追加し、長いラベルによる横幅超過を解消しました。v.03.2を維持し、DevelopProgress.mdを更新しました。指定4チェックはすべて成功しました。変更はCSSと開発記録のみです。
+- 未検証: 修正候補のReview 3周と独立したTest工程は管理側へ引き継ぎます。
+- 未検証: iOS・iPadOS・Windows実機確認は後日ユーザ実施です。Ubuntuのエミュレーションを実機合格とは扱いません。
+- 未検証: iOS固有のズーム・アドレスバー・PWA挙動、Firebase実環境のルール評価・同期遅延、削除操作のE2Eは未検証です。

@@ -363,7 +363,11 @@ button:focus-visible {
   letter-spacing: -0.01em;
 }
 
-.status__meta { font-size: 0.84rem; color: var(--text-dim); }
+.status__meta {
+  font-size: 0.84rem;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
 
 .status[data-state="running"] { border-left-color: var(--start); }
 .status[data-state="running"] .status__label { color: var(--start); }
