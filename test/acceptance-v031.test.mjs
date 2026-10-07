@@ -56,7 +56,7 @@ class FakeElement {
 const chipPairs = (node) => node.find("tag-chip").map((chip) => chip.children.map((c) => c.textContent));
 
 const FUNCTIONS = [
-  "catalogName", "catalogTag", "sortTags", "tagChips", "tagCell", "cell",
+  "catalogName", "catalogTag", "sortTags", "sortRecordTags", "tagChips", "tagCell", "cell",
   "validateRandomItems", "chooseRandomItem", "randomMessage", "randomAction",
   "mutateRandom", "restoreRandom", "readRandomSets", "renderRandomSets",
   "importRandomItems", "interruptRandom", "settleRandom", "startRandom",
@@ -128,10 +128,10 @@ describe("F-10-6 / A-18: タグの整列(クリック順に依存しない)", ()
     assert.deepEqual(stored().items[0].tags, ["外:X", "音:低", "色:赤"]);
   });
 
-  test("記録一覧の選択式ラベルは ';' 連結ではなくチップで、カタログ順(カタログ外は記録順)に並ぶ", () => {
+  test("記録一覧の選択式ラベルは ';' 連結ではなくチップで、固定のジャンル名順に並ぶ（v.03.2で改訂）", () => {
     const { run } = createHarness({ catalog: [{ name: "色:分類", items: ["赤"] }, { name: "音", items: ["低"] }] });
     const cellNode = run(`tagCell(["外:B", "音:低", "別:A", "色%3A分類:赤"])`);
-    assert.deepEqual(chipPairs(cellNode), [["色:分類", "赤"], ["音", "低"], ["外", "B"], ["別", "A"]]);
+    assert.deepEqual(chipPairs(cellNode), [["別", "A"], ["外", "B"], ["色:分類", "赤"], ["音", "低"]]);
     assert.doesNotMatch(cellNode.textContent, /;/);
     assert.equal(run("tagCell([]).textContent"), "—");
   });

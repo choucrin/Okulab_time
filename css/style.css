@@ -698,3 +698,23 @@ button:focus-visible {
   #panel-start { --accent: #9bbaff; --start: #2fbe7c; }
   #random-confirm #random-yes { color: #141d2e; }
 }
+
+/* v.03.2: 表の非表示見出しをスクロール領域内に配置する。 */
+.table th { position: relative; }
+.records, .table-wrap { min-width: 0; max-width: 100%; }
+#random-settings fieldset { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+#random-settings, .random-presets { min-width: 0; overflow-wrap: anywhere; }
+#random-settings legend { max-width: 100%; }
+
+/* 記録一覧のみ、タグとチップ内部を横並びの一行にする。 */
+.tags-cell .tag-chips { flex-wrap: nowrap; margin-block: 0; }
+.tags-cell .tag-chip {
+  flex: none;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding-block: 2px;
+  max-width: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
