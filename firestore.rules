@@ -52,7 +52,7 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['startedBy'])
           && request.resource.data.startedBy == request.auth.uid
           && !exists(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId))
-          && getAfter(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId)).data.mode == 'random'
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId)).data.mode in ['random', 'sequence']
           && getAfter(/databases/$(database)/documents/rooms/$(roomId)/sessions/$(sessionId)).data.startedBy == request.auth.uid;
       allow update, delete: if false;
     }
@@ -118,6 +118,41 @@ service cloud.firestore {
             && incoming().diff(resource.data).affectedKeys().hasOnly(['randomOutcome']);
       }
 
+      // 旧版が新項目を省略する場合も、null を送る場合も許可する。
+      function emptySequence() {
+        return incoming().get('sequenceRunId', null) == null
+            && incoming().get('sequenceTrial', null) == null
+            && incoming().get('sequenceSet', null) == null
+            && incoming().get('sequencePosition', null) == null
+            && incoming().get('sequenceOutcome', null) == null;
+      }
+
+      function validSequenceCreate() {
+        return incoming().mode == 'sequence'
+            && incoming().randomBatchId == null
+            && incoming().randomOutcome == null
+            && incoming().sequenceOutcome == null
+            && incoming().sequenceRunId is string
+            && incoming().sequenceRunId.size() >= 1 && incoming().sequenceRunId.size() <= 128
+            && incoming().sequenceTrial is int
+            && incoming().sequenceTrial >= 1 && incoming().sequenceTrial <= 1000
+            && incoming().sequenceSet is int
+            && incoming().sequenceSet >= 1 && incoming().sequenceSet <= 100
+            && incoming().sequencePosition is int
+            && incoming().sequencePosition >= 1 && incoming().sequencePosition <= 300
+            && validTags(incoming().tags) && incoming().tags.size() >= 1
+            && getAfter(/databases/$(database)/documents/rooms/$(roomId)/startReceipts/$(sessionId)).data.startedBy == request.auth.uid;
+      }
+
+      function validSequenceOutcome() {
+        return resource.data.status == 'done'
+            && resource.data.mode == 'sequence'
+            && resource.data.startedBy == request.auth.uid
+            && resource.data.sequenceOutcome == null
+            && incoming().sequenceOutcome in ['confirmed', 'discarded']
+            && incoming().diff(resource.data).affectedKeys().hasOnly(['sequenceOutcome']);
+      }
+
       function validCreate() {
         return !exists(/databases/$(database)/documents/rooms/$(roomId)/startReceipts/$(sessionId))
             && incoming().status == 'running'
@@ -125,11 +160,12 @@ service cloud.firestore {
             && incoming().label is string
             && incoming().label.size() <= 200
             && (!('tags' in incoming()) || validTags(incoming().tags))
-            && validRandomCreate()
+            && ((validRandomCreate() && emptySequence()) || validSequenceCreate())
             && incoming().startedBy == request.auth.uid
             && incoming().endMs == null
             && incoming().keys().hasOnly([
                  'status', 'label', 'tags', 'mode', 'randomBatchId', 'randomOutcome',
+                 'sequenceRunId', 'sequenceTrial', 'sequenceSet', 'sequencePosition', 'sequenceOutcome',
                  'startMs', 'startRawMs', 'startOffsetMs', 'startAccuracyMs',
                  'startSynced', 'startedBy', 'startedAt',
                  'endMs', 'endRawMs', 'endOffsetMs', 'endAccuracyMs',
@@ -152,7 +188,7 @@ service cloud.firestore {
 
       allow read:   if signedIn();
       allow create: if signedIn() && validCreate();
-      allow update: if signedIn() && (validUpdate() || validRandomOutcome());
+      allow update: if signedIn() && (validUpdate() || validRandomOutcome() || validSequenceOutcome());
       allow delete: if signedIn() && resource.data.status != 'running';
     }
   }

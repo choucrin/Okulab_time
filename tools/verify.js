@@ -24,7 +24,7 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 // 検査そのものも対象に含める(この道具の欠陥で公開が止まるため)
 const JS_FILES = [
   "js/app.js", "js/clock.js", "js/store.js", "js/passages.js", "js/firebase-config.js",
-  "tools/verify.js",
+  "tools/verify.js", "js/sequence.js", "js/reading.js", "js/reading-config.js", "js/passages-long.js",
 ];
 
 let failed = 0;
@@ -146,7 +146,7 @@ check("Firestore ルールと送信フィールド", () => {
   const createExtra = createFields.filter((f) => !createAllow.includes(f));
   must(createExtra.length === 0, `作成時に送るがルールが許可していない: ${createExtra.join(", ")}`);
   must(
-    createFields.length === createAllow.length,
+    createFields.length === createAllow.length && createAllow.every((key) => createFields.includes(key)),
     `作成フィールド数がルールと不一致(送信 ${createFields.length} / 許可 ${createAllow.length})`
   );
 
@@ -168,6 +168,11 @@ check("Firestore ルールと送信フィールド", () => {
   const outcomeFields = [...outcomeBlock[1].matchAll(/(\w+):/g)].map((match) => match[1]);
   must(outcomeFields.length === 1 && outcomeFields[0] === outcomeAllow[0],
     "ランダム判定で専用項目以外を更新しています");
+
+  const sequenceAllow = lists.find((list) => list.length === 1 && list[0] === "sequenceOutcome");
+  const sequenceUpdate = store.match(/tx\.update\(target, \{ sequenceOutcome: outcome \}\);/);
+  must(sequenceAllow && sequenceUpdate, "順序反復判定の専用更新経路が不一致です");
+  must(rules.includes("validSequenceOutcome()") && rules.includes("emptySequence()"), "順序反復の検証がありません");
 
   // 開始受領記録は計測記録と同時に保存し、削除後も保持する。
   const receiptRules = rules.match(/match \/rooms\/\{roomId\}\/startReceipts\/\{sessionId\} \{([\s\S]*?)\n    \}/)?.[1];

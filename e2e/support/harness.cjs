@@ -99,7 +99,7 @@ async function seed(page, appServer, { catalog = null, passphrase, sessions = []
 }
 
 /** 参加画面から入室し、時刻同期(スタブ上のサーバー時刻)の完了まで待つ */
-async function join(page, appServer, { passphrase, role }) {
+async function join(page, appServer, { passphrase, role, pending = false }) {
   // 同じコンテキストの別ページが保存した参加状態で自動入室させない
   await page.goto(`${appServer}/__blank`);
   await page.evaluate(() => localStorage.removeItem('okulab-time/session'));
@@ -110,7 +110,7 @@ async function join(page, appServer, { passphrase, role }) {
   await page.click('#btn-join');
   await expect(page.locator('#screen-main')).toBeVisible();
   await expect(page.locator('#pill-clock')).toHaveText(/同期 ±/);
-  if (role === 'start') await expect(page.locator('#btn-start')).toBeEnabled();
+  if (role === 'start' && !pending) await expect(page.locator('#btn-start')).toBeEnabled();
   if (role === 'end') await expect(page.locator('#btn-end')).toBeEnabled();
 }
 

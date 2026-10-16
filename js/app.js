@@ -8,15 +8,16 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebas
 
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
-import { PASSAGES } from "./passages.js";
+import { sequenceInteger, validateSequence, sequencePosition, validateSequenceRun, settleSequenceRun } from "./sequence.js";
+import { readingDataset, validShown, selectReading } from "./reading.js";
 import {
   deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
   collectDeletable, deleteSessions, isUncertain, SESSION_LIMIT,
-  decideRandomSession, subscribeRandomSession,
+  decideRandomSession, decideSequenceSession, subscribeRandomSession,
 } from "./store.js";
 
-export const APP_VERSION = "v.03.2";
+export const APP_VERSION = "v.04.0";
 
 const CATALOG_KEY = "okulab-time/catalog";
 let catalog = [];
@@ -24,7 +25,7 @@ let catalogSnapshot = null;
 const selectedTags = new Set();
 
 const STORAGE_KEY = "okulab-time/session";
-const READ_KEY = "okulab-time/passages";   // ルームごとに既出の文章を覚えておく
+const { key: READ_KEY, passages: READING_PASSAGES } = readingDataset();   // ルームごとに既出の文章を覚えておく
 const LATE_KEY = "okulab-time/late";       // 退出後に終わった操作の結果(再読み込みでも失わない)
 const MAX_LATE_REPORTS = 20;               // 持ち越す知らせの上限
 // 削除の件数は画面にしか残らない。再読み込みを促す文言より前に出す。
@@ -161,6 +162,10 @@ let randomSelection = new Set();
 let randomRecord = undefined;
 let randomWorking = false;
 let stopRandom = null;
+const SEQUENCE_KEY = "okulab-time/sequence/";
+let sequenceRun = null, sequenceSnapshot = null, sequenceMode = "free", stopSequence = null;
+let sequenceRecord;
+let sequenceSets = 1;
 
 // ── 起動 ────────────────────────────────────────────────────
 
@@ -169,7 +174,7 @@ main();
 function main() {
   el.version.textContent = APP_VERSION;
   initCatalog();
-  initRandom();
+  initSequence();
 
   window.addEventListener("unhandledrejection", (event) => {
     console.error("[okulab-time] 未処理のエラー:", event.reason);
@@ -375,7 +380,7 @@ function readShown(roomId) {
   try {
     const all = JSON.parse(localStorage.getItem(READ_KEY) ?? "{}");
     if (all && typeof all === "object" && !Array.isArray(all) && Array.isArray(all[roomId])) {
-      list = all[roomId].filter((n) => Number.isInteger(n));
+      list = validShown(all[roomId], READING_PASSAGES);
     }
   } catch { /* 読めなければ空から始める */ }
 
@@ -401,23 +406,14 @@ function nextPassage() {
   const roomId = state.roomId;
   if (!roomId) return;
 
-  let shown = readShown(roomId);
-  let remaining = PASSAGES.map((_, i) => i).filter((i) => !shown.includes(i));
-
-  if (remaining.length === 0) {
-    // 出しきったので選び直す。ただし、いま出ている文章は続けて出さない。
-    // 押しても画面が変わらないと、それ自体が手がかりになってしまうため。
-    const current = shown.at(-1);
-    shown = Number.isInteger(current) ? [current] : [];
-    remaining = PASSAGES.map((_, i) => i).filter((i) => i !== current);
-    if (remaining.length === 0) remaining = PASSAGES.map((_, i) => i);
-  }
-
-  const index = remaining[Math.floor(Math.random() * remaining.length)];
-  shown.push(index);
+  const { passage, shown } = selectReading(READING_PASSAGES, readShown(roomId));
   writeShown(roomId, shown);
-
-  el.passageText.textContent = PASSAGES[index];
+  const paragraphs = passage.paragraphs.map((text) => {
+    const p = document.createElement("p");
+    p.textContent = text;
+    return p;
+  });
+  el.passageText.replaceChildren(...paragraphs);
   fitPassage();
   el.passageText.parentElement.scrollTop = 0;   // 新しい文章は先頭から
 }
@@ -532,7 +528,8 @@ function enterRoom(roomId, role, participant = false) {
   state.roomId = roomId;
   state.role = role;
   restoreRandom();
-  try { renderRandomSets(); } catch (err) { randomMessage(err.message); }
+  restoreSequence();
+  try { renderSequenceSets(); } catch (err) { randomMessage(err.message); }
   state.sessions = [];
   state.activeId = null;
   state.sessionsLoaded = false;
@@ -785,6 +782,8 @@ function onLeave() {
 function teardownRoom() {
   stopRandom?.();
   stopRandom = null;
+  stopSequence?.();
+  stopSequence = null;
   roomEpoch += 1;   // 実行中の再送があっても、その結果を反映させない
   stopWatchdog();
   if (stopSessions) { stopSessions(); stopSessions = null; }
@@ -1000,7 +999,7 @@ function renderControls() {
   // 可否の最終判断はサーバーのトランザクションに委ねる。
   // 押せないようにすると、その間の「押した瞬間」が失われてしまう。
   el.btnStart.disabled = !ready || state.busy || randomWorking
-    || (randomMode === "random" && (!randomBatch || randomBatch.next === null || Boolean(randomBatch.pending)));
+    || Boolean(randomBatch?.pending) || Boolean(sequenceRun?.pending) || (sequenceMode === "sequence" && (!sequenceRun || sequenceRun.status !== "active" || Boolean(sequenceRun.pending)));
   el.btnEnd.disabled = !ready || state.busy;
   // 想定外の操作は見た目で抑制する(押すことはできる)
   el.btnStart.classList.toggle("bigbtn--unexpected", ready && running);
@@ -1138,7 +1137,8 @@ function worstAccuracy(s) {
 
 async function onStart(press) {
   if (randomWorking) return;
-  if (randomMode === "random") return startRandom(press);
+  if (randomBatch?.pending || sequenceRun?.pending) return;
+  if (sequenceMode === "sequence") return startSequence(press);
   return startMeasurement(press);
 }
 
@@ -1170,14 +1170,21 @@ async function startMeasurement(press, reserved = null) {
     if (epoch !== roomEpoch) return reportLateResult("計測開始", result, room);
     if (!result.ok) {
       if (reserved && result.code === "SESSION_MISSING") {
-        if (await settleRandom({ id: sessionId, randomBatchId: payload.randomBatchId })) {
-          randomMessage("保存した開始操作の記録はサーバーにありません。削除済み、または未送信のため、回数を加算せず次の試行へ進みました。");
+        if (await (payload.mode === "sequence"
+          ? settleSequence({ id: sessionId, sequenceRunId: payload.sequenceRunId }, true)
+          : settleRandom({ id: sessionId, randomBatchId: payload.randomBatchId }))) {
+          randomMessage("保存した開始操作の記録はサーバーにありません。有効試行数を増やさず開始予約を解除しました。現在の条件で再試行できます。");
         }
         return;
       }
       if (reserved && result.code === "ALREADY_RUNNING") {
-        await mutateRandom((batch) => { if (batch.pending?.id === sessionId) batch.pending = null; });
-        watchRandom();
+        if (payload.mode === "sequence") {
+          await mutateSequence((run) => { if (run.pending?.id === sessionId) run.pending = null; });
+          watchSequence();
+        } else {
+          await mutateRandom((batch) => { if (batch.pending?.id === sessionId) batch.pending = null; });
+          watchRandom();
+        }
       }
       return handleCode(result.code);
     }
@@ -1578,6 +1585,7 @@ const CSV_HEADER = [
   "start_synced", "end_synced",
   "server_started_at", "server_ended_at",
   "started_by", "ended_by",
+  "sequence_run_id", "sequence_trial", "sequence_set", "sequence_position", "sequence_outcome",
 ];
 
 /**
@@ -1646,7 +1654,7 @@ async function exportCsv() {
     for (const s of rows) {
       lines.push([
         csv(s.id), csvText(s.label), csvText((s.tags ?? []).join("; ")), csv(s.status),
-        csv(s.mode === "random" ? "ランダム" : "任意"), csvText(s.randomBatchId ?? ""), csvText(randomOutcomeText(s)),
+        csv(modeText(s)), csvText(s.mode === "sequence" ? "" : (s.randomBatchId ?? "")), csvText(randomOutcomeText(s)),
         csv(formatFull(s.startMs)), csv(toIso(s.startMs)), csv(s.startMs),
         csv(formatFull(s.endMs)), csv(toIso(s.endMs)), csv(s.endMs),
         csv(s.durationMs), csv(s.durationMs != null ? (s.durationMs / 1000).toFixed(3) : ""),
@@ -1656,6 +1664,8 @@ async function exportCsv() {
         csv(s.startSynced), csv(s.endSynced),
         csv(fromTimestamp(s.startedAt)), csv(fromTimestamp(s.endedAt)),
         csv(s.startedBy), csv(s.endedBy),
+        ...[s.sequenceRunId, s.sequenceTrial, s.sequenceSet, s.sequencePosition, sequenceOutcomeText(s)]
+          .map((v) => csvText(s.mode === "sequence" ? (v ?? "") : "")),
       ].join(","));
     }
 
@@ -2390,8 +2400,9 @@ function tagCell(tags) {
 }
 
 function randomRecordText(record) {
-  return record.mode === "random"
-    ? `ランダム / ${randomOutcomeText(record)}` : "任意";
+  if (record.mode === "sequence") return `順序反復 / ${sequenceOutcomeText(record)}`;
+  return record.mode === "random" ? `ランダム / ${randomOutcomeText(record)}`
+    : record.mode == null || record.mode === "free" ? "任意" : "不明";
 }
 
 function validateRandomItems(items) {
@@ -2476,7 +2487,7 @@ function restoreRandom() {
         || (saved.pending && (typeof saved.pending.id !== "string" || !saved.items[saved.pending.index]
           || saved.pending.payload?.randomBatchId !== saved.id))) throw new Error("保存済み進行状況が不正です。");
       randomBatch = saved;
-      if (saved.next !== null || saved.pending) randomMode = saved.mode ?? "random";
+      if (saved.pending) randomMode = "random";
     }
     randomMessage("");
     if (state.role === "start") watchRandom();
@@ -2533,7 +2544,9 @@ async function settleRandom(record) {
         batch.previous = [...item.tags];
       }
       batch.pending = null;
-      batch.next = chooseRandomItem(batch.items);
+      // 旧バッチは現在の1試行だけ決着させ、残りは明示的に終了する。
+      const remaining = batch.items.findIndex((item) => item.done < item.count);
+      batch.next = remaining < 0 ? null : remaining;
       if (batch.next === null) batch.mode = "free";
     });
     if (epoch !== roomEpoch) return;
@@ -2551,7 +2564,7 @@ async function settleRandom(record) {
   return true;
 }
 
-function renderRandom() {
+function renderLegacyRandom() {
   const active = randomMode === "random";
   const pending = randomBatch?.pending;
   $("measurement-mode").checked = active;
@@ -2609,31 +2622,12 @@ function renderRandom() {
   $("random-retry").disabled = randomWorking || state.busy;
 }
 
-async function startRandom(press) {
-  if (state.busy || randomWorking || !state.roomId || randomBatch?.pending) return;
-  if (!press.synced && !confirmUnsynced()) return;
-  await randomAction(async () => {
-    await mutateRandom((batch) => {
-      if (!batch || batch.next === null) throw new Error("ランダム条件をインポートしてください。");
-      batch.pending = {
-        id: newSessionId(db, state.roomId), index: batch.next, receiptVersion: 1,
-        payload: { ...press, label: el.inputLabel.value.trim().slice(0, 80),
-          tags: sortTags(batch.items[batch.next].tags), uid: state.uid,
-          mode: "random", randomBatchId: batch.id },
-      };
-    });
-    const pending = randomBatch.pending;
-    watchRandom();
-    await startMeasurement(press, pending);
-  });
-}
-
 function renderRandomSettings() {
   const options = $("random-options");
   options.replaceChildren();
   const available = new Set(catalog.flatMap((genre) => genre.items.map((item) => catalogTag(genre.name, item))));
   randomSelection = new Set([...randomSelection].filter((tag) => available.has(tag)));
-  if (!available.size) options.textContent = "まだ何も登録されていません。未選択で項目を追加できます。";
+  if (!available.size) options.textContent = "条件の追加にはラベルカタログへの登録が必要です。";
   for (const genre of catalog) {
     const field = document.createElement("fieldset");
     const legend = document.createElement("legend");
@@ -2668,11 +2662,23 @@ function renderRandomSettings() {
   randomDraft.forEach((item, index) => {
     const row = document.createElement("div");
     row.className = "random-item";
-    row.append(document.createTextNode(`項目 ${index + 1}　× ${item.count} 回`), tagChips(item.tags),
-      catalogButton("削除", () => { randomDraft.splice(index, 1); renderRandomSettings(); }));
+    row.append(document.createTextNode(`条件 ${index + 1}　× ${item.count} 回`), tagChips(item.tags));
+    for (const [label, delta] of [["上へ", -1], ["下へ", 1], ["削除", 0]]) {
+      const button = catalogButton(label, () => {
+        if (!delta) randomDraft.splice(index, 1);
+        else [randomDraft[index], randomDraft[index + delta]] = [randomDraft[index + delta], randomDraft[index]];
+        renderRandomSettings();
+      });
+      button.setAttribute("aria-label", `条件 ${index + 1} を${label}`);
+      button.disabled = delta !== 0 && !randomDraft[index + delta];
+      row.append(button);
+    }
     $("random-items").append(row);
   });
-  $("random-total").textContent = `総試行回数: ${randomDraft.reduce((sum, item) => sum + item.count, 0)}`;
+  const perSet = randomDraft.reduce((sum, item) => sum + item.count, 0);
+  let total = "—";
+  try { total = perSet * sequenceInteger($("sequence-sets").value, 100, "セット数"); } catch { /* 不正入力中は古い合計を表示しない */ }
+  $("random-total").textContent = `1セット内の試行数: ${perSet} / セット数: ${$("sequence-sets").value} / 総試行数: ${total}`;
 }
 
 function readRandomSets() {
@@ -2702,28 +2708,10 @@ function renderRandomSets() {
   if (sets.some((set) => set.name === selected)) $("random-saved").value = selected;
 }
 
-async function importRandomItems(source) {
-  if (state.busy || state.activeId || randomBatch?.pending) throw new Error("計測と確認を完了してからインポートしてください。");
-  validateRandomItems(source);
-  if (randomBatch?.next != null && !confirm("既存バッチの残り試行分を破棄し、新しいバッチに置き換えますか？記録は残ります。")) return;
-  const epoch = roomEpoch;
-  await mutateRandom(() => {
-    if (state.busy || state.activeId || randomBatch?.pending) throw new Error("計測と確認を完了してください。");
-    const items = source.map((item) => ({ tags: sortTags(item.tags), count: item.count, done: 0 }));
-    return { id: crypto.randomUUID(), items, previous: null, next: chooseRandomItem(items), pending: null, mode: "random" };
-  });
-  if (epoch !== roomEpoch) return;
-  randomMode = "random";
-  $("random-settings").hidden = true;
-  randomMessage("ランダムバッチを確定しました。");
-  watchRandom();
-  return true;
-}
-
 async function interruptRandom() {
   if (state.busy || state.activeId || randomBatch?.pending || randomBatch?.next == null) return;
   const remaining = randomBatch.items.reduce((sum, item) => sum + item.count - item.done, 0);
-  if (!confirm(`残り ${remaining} 回を破棄してランダム計測を中断しますか？（これまでの記録は残ります）`)) return;
+  if (!confirm(`残り ${remaining} 回を破棄して旧ランダムバッチを終了しますか？（これまでの記録は残ります）`)) return;
   const epoch = roomEpoch;
   await mutateRandom((batch) => {
     if (state.busy || state.activeId || batch.pending) throw new Error("計測と確認を完了してから中断してください。");
@@ -2734,88 +2722,294 @@ async function interruptRandom() {
   randomMode = "free";
   $("random-settings").hidden = true;
   watchRandom();
-  randomMessage("ランダム計測を中断しました。任意方式に戻りました。");
+  randomMessage("旧ランダムバッチを終了しました。既存の記録は残ります。");
 }
 
-function initRandom() {
+
+function modeText(record) {
+  return record.mode === "sequence" ? "順序反復" : record.mode === "random" ? "ランダム"
+    : record.mode == null || record.mode === "free" ? "任意" : "不明";
+}
+function sequenceOutcomeText(record) {
+  if (record.mode !== "sequence") return "";
+  return record.sequenceOutcome === "confirmed" ? "有効"
+    : record.sequenceOutcome === "discarded" ? "順序反復試行内のエラーデータ" : "未確定";
+}
+function legacyActive() { return Boolean(randomBatch && (randomBatch.next !== null || randomBatch.pending)); }
+
+async function mutateSequence(change) {
+  if (!navigator.locks?.request) throw new Error("安全な保存にはWeb Locks対応ブラウザとHTTPS接続が必要です。");
+  const room = state.roomId, expected = sequenceSnapshot;
+  return navigator.locks.request(SEQUENCE_KEY + room, () => {
+    if (room !== state.roomId) throw new Error("ルームが変わりました。");
+    if (localStorage.getItem(SEQUENCE_KEY + room) !== expected) {
+      restoreSequence();
+      throw new Error("別のタブで進行状況が変わりました。最新の表示を確認してください。");
+    }
+    const copy = sequenceRun ? structuredClone(sequenceRun) : null;
+    const updated = change(copy) ?? copy;
+    validateSequenceRun(updated);
+    const serialized = JSON.stringify(updated);
+    localStorage.setItem(SEQUENCE_KEY + room, serialized);
+    sequenceRun = updated;
+    sequenceSnapshot = serialized;
+    sequenceMode = updated.mode;
+  });
+}
+function restoreSequence() {
+  stopSequence?.(); stopSequence = null;
+  sequenceRun = null; sequenceRecord = undefined; sequenceMode = "free";
+  try {
+    sequenceSnapshot = localStorage.getItem(SEQUENCE_KEY + state.roomId);
+    const saved = JSON.parse(sequenceSnapshot ?? "null");
+    if (saved) { sequenceRun = validateSequenceRun(saved); sequenceMode = saved.mode; }
+    if (randomBatch?.pending) sequenceMode = "sequence";
+    watchSequence();
+    renderSequenceSets();
+  } catch (err) {
+    sequenceSnapshot = Symbol("invalid");
+    randomMessage(err.message + " 既存データは上書きしません。");
+  }
+}
+function watchSequence() {
+  stopSequence?.(); stopSequence = null; sequenceRecord = undefined;
+  const pending = sequenceRun?.pending, room = state.roomId;
+  if (!pending || state.role !== "start") return;
+  let observed = pending.observed === true;
+  let updates = Promise.resolve();
+  stopSequence = subscribeRandomSession(db, room, pending.id, (record) => {
+    updates = updates.then(async () => {
+      if (state.roomId !== room || sequenceRun?.pending?.id !== pending.id) return;
+      if (record && (record.mode !== "sequence" || record.sequenceRunId !== sequenceRun.id)) {
+        throw new Error("受信した記録の実行識別子が一致しません。");
+      }
+      sequenceRecord = record;
+      if (record) {
+        observed = true;
+        if (!sequenceRun.pending.observed) await mutateSequence((run) => { run.pending.observed = true; });
+        if (record.status === "aborted" || record.sequenceOutcome) await settleSequence(record);
+      } else if (observed) await settleSequence({ id: pending.id, sequenceRunId: pending.payload.sequenceRunId, deleted: true });
+      renderControls();
+    }).catch((err) => { randomMessage(err.message); renderControls(); });
+  }, (err) => randomMessage(describeError(err) + " 保存した開始操作を再送・確認してください。"));
+}
+async function settleSequence(record, missingReceipt = false) {
+  try {
+    const room = state.roomId;
+    await mutateSequence((run) => {
+      const observedDeletion = missingReceipt && run.pending?.observed === true;
+      return settleSequenceRun(run, observedDeletion ? { ...record, deleted: true } : record,
+        missingReceipt && !observedDeletion);
+    });
+    if (room !== state.roomId) return false;
+    if (sequenceRun.status === "completed") randomMessage(`順序反復計測が完了しました(有効 ${sequenceRun.total} 回/実際の計測 ${sequenceRun.attempts} 回)`);
+    watchSequence(); renderControls(); return true;
+  } catch (err) { randomMessage(err.message); renderControls(); return false; }
+}
+async function startSequence(press) {
+  if (state.busy || randomWorking || !state.roomId || sequenceRun?.pending || legacyActive()) return;
+  if (!press.synced && !confirmUnsynced()) return;
+  await randomAction(async () => {
+    await mutateSequence((run) => {
+      if (!run || run.status !== "active" || run.pending) throw new Error("順序反復の実行を確定してください。");
+      const pos = sequencePosition(run.steps, run.sets, run.done);
+      run.pending = { id: newSessionId(db, state.roomId), trial: run.done + 1, receiptVersion: 1,
+        payload: { ...press, label: el.inputLabel.value.trim().slice(0, 80), uid: state.uid,
+          tags: pos.tags, mode: "sequence", sequenceRunId: run.id, sequenceTrial: run.done + 1,
+          sequenceSet: pos.set, sequencePosition: pos.position } };
+    });
+    const pending = sequenceRun.pending;
+    watchSequence(); await startMeasurement(pending.payload, pending);
+  });
+}
+function readSequenceSets() {
+  const saved = JSON.parse(localStorage.getItem(SEQUENCE_KEY + "sets") ?? "[]");
+  if (!Array.isArray(saved) || saved.length > 50) throw new Error("保存済みパターンが不正です。");
+  const names = new Set();
+  for (const item of saved) {
+    if (typeof item.name !== "string" || catalogName(item.name) !== item.name || names.has(item.name)) throw new Error("保存名が不正です。");
+    names.add(item.name); validateSequence(item.steps, item.sets);
+  }
+  return saved;
+}
+function renderSequenceSets() {
+  const selected = $("random-saved").value, sets = readSequenceSets();
+  $("random-saved").replaceChildren();
+  for (const set of sets) {
+    const option = document.createElement("option"); option.value = set.name; option.textContent = set.name;
+    $("random-saved").append(option);
+  }
+  if (sets.some((set) => set.name === selected)) $("random-saved").value = selected;
+  $("random-saved-label").hidden = !sets.length;
+  $("random-saved-empty").hidden = Boolean(sets.length);
+  const old = readRandomSets();
+  $("legacy-saved").replaceChildren();
+  for (const set of old) {
+    const option = document.createElement("option"); option.value = set.name; option.textContent = set.name;
+    $("legacy-saved").append(option);
+  }
+}
+function renderRandom() {
+  const active = sequenceMode === "sequence";
+  if (randomBatch?.pending) { renderLegacyRandom(); }
+  else {
+    const pending = sequenceRun?.pending, run = sequenceRun;
+    const locked = state.busy || randomWorking || Boolean(pending) || Boolean(state.activeId);
+    $("measurement-mode").checked = active;
+    $("measurement-mode").disabled = locked;
+    $("random-open").hidden = !active;
+    $("random-open").disabled = locked;
+    $("random-presets").hidden = !active;
+    $("random-saved").disabled = locked;
+    $("random-load").disabled = locked || legacyActive() || !$("random-saved").options.length;
+    el.catalogOptions.hidden = active;
+    $("random-progress").hidden = !active;
+    const progress = $("random-progress"); progress.replaceChildren();
+    if (active && !run) progress.textContent = "保存済みパターンを呼び出すか、設定ページで条件を登録してください。";
+    if (active && run) {
+      const pos = sequencePosition(run.steps, run.sets, run.done);
+      for (const [title, value] of [
+        ["現在の条件", tagChips(pos?.tags, "なし")],
+        ["残り試行数", `${run.total - run.done} / ${run.total} 回`],
+        ["セット・位置", pos ? `セット ${pos.set} / ${run.sets}・${pos.position} / ${run.total / run.sets} 番目・条件 ${pos.index + 1} の ${run.steps[pos.index].count} 回中 ${pos.repeat} 回目` : run.status === "completed" ? "完了" : "中断済み"],
+        ["有効試行の完了数", `${run.done} 回`],
+        ["実際の計測回数(再試行を含む)", `${run.attempts} 回(うち記録しない・中止・消失 ${run.attempts - run.done} 回)`],
+        ["前回の有効試行", tagChips(run.previous, "なし")],
+      ]) {
+        const section = document.createElement("div"); section.className = title === "現在の条件" || title === "残り試行数" ? "trial-section trial-section--next" : "trial-section";
+        const heading = document.createElement("h3"); heading.textContent = title;
+        section.append(heading, value); progress.append(section);
+      }
+    }
+    const running = pending && sequenceRecord?.status === "running";
+    $("random-interrupt").hidden = !active || run?.status !== "active";
+    $("random-interrupt").textContent = running ? "この試行を中止" : "順序反復計測を中断";
+    $("random-interrupt").disabled = state.busy || randomWorking || (Boolean(pending) && !running) || (Boolean(state.activeId) && !running);
+    $("random-interrupt-hint").textContent = pending && !running ? "開始操作・判定の確認が終わるまで中断できません。" : "";
+    const confirmation = $("random-confirm"), hidden = confirmation.hidden;
+    confirmation.hidden = !pending || sequenceRecord?.status !== "done" || Boolean(sequenceRecord?.sequenceOutcome);
+    if (hidden && !confirmation.hidden) confirmation.focus();
+    $("random-yes").disabled = randomWorking || state.busy;
+    $("random-no").disabled = randomWorking || state.busy;
+    $("random-retry").hidden = !pending || Boolean(sequenceRecord);
+    $("random-retry").disabled = randomWorking || state.busy;
+  }
+  const legacy = Boolean(randomBatch?.pending);
+  $("random-confirm-question").textContent = legacy ? "今回の記録を保存しますか？" : "今回の試行を記録しますか？";
+  $("random-yes").textContent = legacy ? "Yes" : "記録する";
+  $("random-no").textContent = legacy ? "No" : "記録しない";
+  $("legacy-controls").hidden = !(active || legacy);
+  const remaining = randomBatch?.items.reduce((n, item) => n + item.count - item.done, 0) ?? 0;
+  $("legacy-status").textContent = legacyActive() ? `旧ランダムバッチ(残り ${remaining} 回)が残っています。現在の試行を決着させ、旧バッチを終了してください。` : "";
+  $("legacy-end").hidden = !legacyActive();
+  $("legacy-end").disabled = state.busy || randomWorking || legacy || Boolean(state.activeId);
+  $("legacy-load").disabled = state.busy || randomWorking || legacy || Boolean(sequenceRun?.pending) || !$("legacy-saved").options.length;
+  const opened = !$("random-settings").hidden;
+  $("random-open").textContent = opened ? "順序反復条件設定を閉じる ﹀" : "順序反復条件設定を開く ›";
+  $("random-open").setAttribute("aria-expanded", String(opened));
+}
+async function importSequence(steps, sets, name = null) {
+  if (state.busy || state.activeId || sequenceRun?.pending || legacyActive()) throw new Error("計測と判定・旧バッチの終了を完了してください。");
+  validateSequence(steps, sets);
+  if (sequenceRun?.status === "active" && !confirm(`未完了の順序反復(残り ${sequenceRun.total - sequenceRun.done} 回)を破棄して新しい実行に置き換えますか？(これまでの記録は残ります)`)) return;
+  const frozen = steps.map((step) => ({ tags: sortTags(step.tags), count: step.count }));
+  await mutateSequence(() => {
+    if (state.busy || state.activeId || sequenceRun?.pending || legacyActive()) throw new Error("計測と確認を完了してください。");
+    return { v: 1, id: crypto.randomUUID(), name, steps: frozen, sets, total: validateSequence(frozen, sets).total,
+      done: 0, attempts: 0, previous: null, pending: null, status: "active", mode: "sequence" };
+  });
+  $("random-settings").hidden = true; randomMessage("順序反復の実行を確定しました。");
+  watchSequence();
+}
+function initSequence() {
   $("measurement-mode").addEventListener("change", () => {
-    const mode = $("measurement-mode").checked ? "random" : "free";
+    const mode = $("measurement-mode").checked ? "sequence" : "free";
     return randomAction(async () => {
-      if (state.busy || state.activeId || randomBatch?.pending) return;
-      if (randomBatch) await mutateRandom((batch) => { batch.mode = mode; });
-      randomMode = mode;
-      $("random-settings").hidden = true;
-      if (mode === "random") renderRandomSets();
+    if (state.busy || state.activeId || sequenceRun?.pending || randomBatch?.pending) return;
+    if (sequenceRun) await mutateSequence((run) => { run.mode = mode; });
+    sequenceMode = mode; $("random-settings").hidden = true; renderSequenceSets();
     });
   });
   $("random-open").addEventListener("click", () => randomAction(() => {
     $("random-settings").hidden = !$("random-settings").hidden;
-    renderRandomSettings();
-    renderRandomSets();
-    if (!$("random-settings").hidden) $("random-count").focus();
+    renderRandomSettings(); renderSequenceSets();
   }));
+  $("sequence-sets").addEventListener("input", () => {
+    try { sequenceSets = sequenceInteger($("sequence-sets").value, 100, "セット数"); renderRandomSettings(); }
+    catch (err) { randomMessage(err.message); renderRandomSettings(); }
+  });
   $("random-add").addEventListener("click", () => randomAction(() => {
-    const item = { tags: sortTags(randomSelection), count: Number($("random-count").value) };
-    validateRandomItems([...randomDraft, item]);
-    randomDraft.push(item);
-    renderRandomSettings();
+    const item = { tags: sortTags(randomSelection), count: sequenceInteger($("random-count").value, 50, "実施回数") };
+    sequenceSets = sequenceInteger($("sequence-sets").value, 100, "セット数");
+    validateSequence([...randomDraft, item], sequenceSets); randomDraft.push(item); renderRandomSettings();
   }));
   $("random-save").addEventListener("click", () => randomAction(async () => {
     const name = catalogName($("random-name").value);
-    validateRandomItems(randomDraft);
-    if (!navigator.locks?.request) throw new Error("安全な保存にはWeb Locks対応ブラウザとHTTPS接続が必要です。");
-    await navigator.locks.request(RANDOM_KEY + "sets", () => {
-      const sets = readRandomSets();
-      const old = sets.findIndex((set) => set.name === name);
-      if (old >= 0 && !confirm(`「${name}」を上書きしますか？`)) return;
-      const saved = { name, items: randomDraft };
-      if (old >= 0) sets[old] = saved;
-      else sets.push(saved);
-      localStorage.setItem(RANDOM_KEY + "sets", JSON.stringify(sets));
-      randomMessage("ランダム条件セットを保存しました。");
-      renderRandomSets();
+    sequenceSets = sequenceInteger($("sequence-sets").value, 100, "セット数");
+    validateSequence(randomDraft, sequenceSets);
+    if (!navigator.locks?.request) throw new Error("Web Locks対応ブラウザが必要です。");
+    await navigator.locks.request(SEQUENCE_KEY + "sets", () => {
+      const saved = readSequenceSets(), index = saved.findIndex((set) => set.name === name);
+      if (index >= 0 && !confirm(`「${name}」を上書きしますか？`)) return;
+      if (index < 0 && saved.length >= 50) throw new Error("保存できるパターンは50件までです。");
+      const entry = { name, steps: structuredClone(randomDraft), sets: sequenceSets };
+      if (index < 0) saved.push(entry); else saved[index] = entry;
+      localStorage.setItem(SEQUENCE_KEY + "sets", JSON.stringify(saved));
+      renderSequenceSets(); $("random-saved").value = name; randomMessage("パターンを保存しました。");
     });
   }));
   $("random-load").addEventListener("click", () => randomAction(async () => {
-    const saved = readRandomSets().find((set) => set.name === $("random-saved").value);
-    if (!saved) throw new Error("保存済みセットを選んでください。");
-    if (await importRandomItems(saved.items)) {
-      randomDraft = saved.items.map((item) => ({ tags: sortTags(item.tags), count: item.count }));
-      $("random-name").value = saved.name;
-      renderRandomSettings();
-    }
+    const saved = readSequenceSets().find((set) => set.name === $("random-saved").value);
+    if (!saved) throw new Error("保存済みパターンを選んでください。");
+    randomDraft = structuredClone(saved.steps); sequenceSets = saved.sets;
+    $("sequence-sets").value = String(sequenceSets); $("random-name").value = saved.name;
+    renderRandomSettings(); await importSequence(randomDraft, sequenceSets, saved.name);
   }));
-  $("random-import").addEventListener("click", () => randomAction(() => importRandomItems(randomDraft)));
+  $("random-import").addEventListener("click", () => randomAction(() => importSequence(randomDraft, sequenceInteger($("sequence-sets").value, 100, "セット数"))));
+  $("legacy-load").addEventListener("click", () => randomAction(() => {
+    const saved = readRandomSets().find((set) => set.name === $("legacy-saved").value);
+    if (!saved) throw new Error("旧ランダム設定を選んでください。");
+    randomDraft = structuredClone(saved.items); sequenceSets = 1; $("sequence-sets").value = "1";
+    $("random-settings").hidden = false; renderRandomSettings();
+    randomMessage("旧ランダム設定から読み込みました。新方式では登録順に連続して実施します。順序とセット数を確認してから『この内容で計測に使う』を押してください。");
+  }));
+  $("legacy-end").addEventListener("click", () => randomAction(interruptRandom));
   $("random-interrupt").addEventListener("click", () => {
+    const pending = randomBatch?.pending ?? sequenceRun?.pending;
+    const record = randomBatch?.pending ? randomRecord : sequenceRecord;
     if (state.busy || randomWorking) return;
-    if (randomBatch?.pending && randomRecord?.status === "running") return onAbort(randomBatch.pending.id);
-    return randomAction(interruptRandom);
+    if (pending && record?.status === "running") return onAbort(pending.id);
+    return randomAction(async () => {
+      if (!sequenceRun || sequenceRun.status !== "active" || sequenceRun.pending || state.activeId) return;
+      if (!confirm(`残り ${sequenceRun.total - sequenceRun.done} 回を破棄して順序反復計測を中断しますか？(これまでの記録は残ります)`)) return;
+      await mutateSequence((run) => {
+        if (run.pending || state.activeId) throw new Error("計測と確認を完了してください。");
+        run.status = "interrupted"; run.mode = "free";
+      });
+      $("random-settings").hidden = true; randomMessage("順序反復計測を中断しました。任意方式に戻りました。");
+    });
   });
   const decide = (outcome) => randomAction(async () => {
-    const pending = randomBatch?.pending;
-    if (!pending || randomRecord?.status !== "done") return;
-    const epoch = roomEpoch;
-    await decideRandomSession(db, state.roomId, pending.id, outcome);
-    if (epoch !== roomEpoch) return;
-    // ローカル回数はサーバー購読の確定結果だけから進める。
-    watchRandom();
+    const legacy = Boolean(randomBatch?.pending), pending = legacy ? randomBatch.pending : sequenceRun?.pending;
+    const record = legacy ? randomRecord : sequenceRecord;
+    if (!pending || record?.status !== "done") return;
+    await (legacy ? decideRandomSession : decideSequenceSession)(db, state.roomId, pending.id, outcome);
+    // 購読のサーバー確定通知でのみ進行する。購読を再起動して通知を落とさない。
   });
   $("random-yes").addEventListener("click", () => decide("confirmed"));
   $("random-no").addEventListener("click", () => decide("discarded"));
   $("random-retry").addEventListener("click", () => randomAction(async () => {
-    const pending = randomBatch?.pending;
+    const pending = randomBatch?.pending ?? sequenceRun?.pending;
     if (!pending) return;
-    watchRandom();
+    if (randomBatch?.pending) watchRandom(); else watchSequence();
     await startMeasurement(pending.payload, pending);
   }));
   window.addEventListener("storage", (event) => {
-    if (event.key === RANDOM_KEY + "sets") {
-      try { renderRandomSets(); } catch (err) { randomMessage(err.message); }
+    try {
+      if (event.key === SEQUENCE_KEY + "sets" || event.key === RANDOM_KEY + "sets") renderSequenceSets();
+      if (state.roomId && event.key === SEQUENCE_KEY + state.roomId) restoreSequence();
+      if (state.roomId && event.key === RANDOM_KEY + state.roomId) restoreRandom();
       renderControls();
-    }
-    if (state.roomId && event.key === RANDOM_KEY + state.roomId) {
-      restoreRandom();
-      renderControls();
-    }
+    } catch (err) { randomMessage(err.message); }
   });
 }

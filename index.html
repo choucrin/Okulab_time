@@ -130,21 +130,28 @@
     <!-- 開始パネル -->
     <div class="panel" id="panel-start" hidden>
       <label class="mode-switch">
-        <span>ランダム条件で計測<span class="mode-switch__hint">オフ：任意 ／ オン：ランダム</span></span>
+        <span>順序反復で計測<span class="mode-switch__hint">オフ：任意 ／ オン：順序反復</span></span>
         <input id="measurement-mode" type="checkbox" role="switch">
       </label>
       <div id="random-presets" class="random-presets" hidden>
-        <label class="field" id="random-saved-label">保存済みセット<select id="random-saved"></select></label>
-        <p id="random-saved-empty">保存済みセットはありません</p>
+        <label class="field" id="random-saved-label">保存済みパターン<select id="random-saved"></select></label>
+        <p id="random-saved-empty">保存済みパターンはありません</p>
         <button type="button" class="btn" id="random-load">呼び出して計測に使う</button>
       </div>
-      <button type="button" class="btn" id="random-open" aria-expanded="false" aria-controls="random-settings" hidden>ランダム条件設定を開く ›</button>
-      <section id="random-settings" class="catalog" aria-label="ランダム条件設定ページ" hidden>
-        <h2>ランダム条件設定</h2>
+      <div id="legacy-controls" hidden>
+        <p id="legacy-status"></p>
+        <label class="field">旧ランダム設定<select id="legacy-saved"></select></label>
+        <button type="button" class="btn" id="legacy-load">旧設定を作成中の内容に読み込む</button>
+        <button type="button" class="btn" id="legacy-end">旧ランダムバッチを終了</button>
+      </div>
+      <button type="button" class="btn" id="random-open" aria-expanded="false" aria-controls="random-settings" hidden>順序反復条件設定を開く ›</button>
+      <section id="random-settings" class="catalog" aria-label="順序反復条件設定ページ" hidden>
+        <h2>順序反復条件設定</h2>
         <div id="random-options"></div>
-        <label class="field">試行回数<input id="random-count" type="number" min="1" step="1" value="1"></label>
+        <label class="field">実施回数<input id="random-count" type="text" inputmode="numeric" value="1"></label>
         <button type="button" class="btn" id="random-add">項目を追加</button>
         <div id="random-items"></div>
+        <label class="field">セット反復回数<input id="sequence-sets" type="text" inputmode="numeric" value="1"></label>
         <label class="field">保存名<input id="random-name" maxlength="40"></label>
         <button type="button" class="btn" id="random-save">名前を付けて保存</button>
         <button type="button" class="btn" id="random-import">この内容で計測に使う</button>
@@ -169,17 +176,17 @@
         </details>
         <p id="catalog-message" role="status"></p>
       </section>
-      <section id="random-progress" aria-label="ランダム試行状況" hidden></section>
-      <button type="button" class="btn btn--danger" id="random-interrupt" aria-describedby="random-interrupt-hint" hidden>ランダム計測を中断</button>
+      <section id="random-progress" aria-label="順序反復試行状況" hidden></section>
+      <button type="button" class="btn btn--danger" id="random-interrupt" aria-describedby="random-interrupt-hint" hidden>順序反復計測を中断</button>
       <button type="button" class="btn" id="random-retry" hidden>保存した開始操作を再送・確認</button>
       <button type="button" class="bigbtn bigbtn--start" id="btn-start" disabled>
         <span class="bigbtn__title">計測開始</span>
         <span class="bigbtn__sub" id="start-sub">接続中…</span>
       </button>
       <div id="random-confirm" role="alertdialog" aria-label="記録の保存確認" aria-describedby="random-confirm-question" tabindex="-1" hidden>
-        <p id="random-confirm-question">今回の記録を保存しますか？</p>
-        <button type="button" class="btn" id="random-yes">Yes</button>
-        <button type="button" class="btn" id="random-no">No</button>
+        <p id="random-confirm-question">今回の試行を記録しますか？</p>
+        <button type="button" class="btn" id="random-yes">記録する</button>
+        <button type="button" class="btn" id="random-no">記録しない</button>
       </div>
       <p id="random-interrupt-hint" class="muted" role="status"></p>
       <p id="random-message" role="status"></p>
@@ -254,7 +261,7 @@
   <button type="button" class="detect" id="btn-detect" aria-label="気づきを検出"><span class="sr-only">気づきを検出</span></button>
 
   <div class="reading">
-    <p class="reading__text" id="passage-text"></p>
+    <div class="reading__text" id="passage-text"></div>
   </div>
 
   <button type="button" class="btn btn--ghost btn--sm switch-back" id="btn-experimenter">
@@ -263,7 +270,7 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.03.2</p>
+<p class="version" id="version">v.04.0</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

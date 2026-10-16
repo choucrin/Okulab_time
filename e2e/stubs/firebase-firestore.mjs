@@ -4,7 +4,7 @@
 // Playwright の route でこのファイルに差し替える。js/store.js・js/clock.js が使う
 // API だけを最小限に実装する。データは同じブラウザコンテキストの localStorage に
 // 置き、開始端末・終了端末役の 2 ページで共有する(他ページの変更は定期確認で通知)。
-// セキュリティルールは評価しない(ルール・送信フィールドは F-11 で変更なし、RSD 7-3)。
+// セキュリティルールは評価しない。判定競合はWeb Locksでトランザクションを直列化して模す。
 
 const KEY = "__okulab_e2e_firestore__";
 const listeners = new Set();
@@ -121,6 +121,7 @@ export function writeBatch() {
 }
 
 export async function runTransaction(_db, updateFunction) {
+  return navigator.locks.request(KEY + "/transactions", async () => {
   await sleep(10);
   const store = load();
   const writes = [];
@@ -133,6 +134,7 @@ export async function runTransaction(_db, updateFunction) {
   const result = await updateFunction(tx);
   commit(writes);
   return result;
+  });
 }
 
 export function onSnapshot(target, ...args) {

@@ -79,7 +79,7 @@ for (const [condition, catalog] of [['カタログ無し(カタログを持た�
     const roomId = await seed(page, appServer, { catalog, passphrase, sessions: SESSIONS.map((s) => s.doc) });
     await join(page, appServer, { passphrase, role: 'start' });
     await expect(page.locator('#record-body tr')).toHaveCount(SESSIONS.length);
-    await expect(page.locator('#version')).toHaveText('v.03.2');
+    await expect(page.locator('#version')).toHaveText('v.04.0');
 
     // A-25: 見出しとセルの対応
     const headings = await page.locator('.table thead th').allTextContents();
@@ -191,7 +191,7 @@ test('A-24: 計測者画面の全状態でページ全体が画面幅を超え�
   await check('ランダム設定・項目追加後');
   await page.fill('#random-name', 'S'.repeat(40));
   await page.click('#random-save');
-  await expect(page.locator('#random-message')).toHaveText('ランダム条件セットを保存しました。');
+  await expect(page.locator('#random-message')).toHaveText('パターンを保存しました。');
   await check('保存済みセットあり');
   await snap(page, testInfo, 'random-settings');
   await page.click('#random-import');
@@ -259,7 +259,7 @@ test('A-28: 任意方式の開始→終了→一覧反映と中止(開始端末�
   expect(blocked).toEqual([]);
 });
 
-test('A-28: ランダム方式の開始→終了→Yes/No 確認後の一覧表示', async ({ page, context, appServer, blocked, isMobile }, testInfo) => {
+test('A-28: 順序反復方式の開始→終了→記録する/記録しない 確認後の一覧表示', async ({ page, context, appServer, blocked, isMobile }, testInfo) => {
   page.on('dialog', (dialog) => dialog.accept());
   const passphrase = 'e2e-random';
   // カタログ順が「パターン → 色」の端末。送信 tags はこの順で保存される
@@ -276,37 +276,37 @@ test('A-28: ランダム方式の開始→終了→Yes/No 確認後の一覧表�
   await page.fill('#random-count', '2');
   await page.click('#random-add');
   await page.click('#random-import');
-  await expect(page.locator('#random-message')).toHaveText('ランダムバッチを確定しました。');
-  await expect(page.locator('#random-progress')).toContainText('残り試行回数2 回');
+  await expect(page.locator('#random-message')).toHaveText('順序反復の実行を確定しました。');
+  await expect(page.locator('#random-progress')).toContainText('残り試行数2 / 2 回');
 
-  for (const [answer, outcome, remaining] of [['#random-yes', '有効', '1 回'], ['#random-no', 'ランダム試行内のエラーデータ', '1 回']]) {
+  for (const [answer, outcome, remaining] of [['#random-yes', '有効', '1 / 2 回'], ['#random-no', '順序反復試行内のエラーデータ', '1 / 2 回']]) {
     await expect(page.locator('#btn-start')).toBeEnabled();
     await press(page, '#btn-start', isMobile);
     await expect(end.locator('#status-label')).toHaveText('計測中');
     await end.waitForTimeout(300);
     await press(end, '#btn-end', isMobile);
     await expect(page.locator('#random-confirm')).toBeVisible();
-    await expect(page.locator('#record-body tr').first().locator('td').nth(3)).toHaveText('ランダム / 未確定');
+    await expect(page.locator('#record-body tr').first().locator('td').nth(3)).toHaveText('順序反復 / 未確定');
     await expectNoOverflow(page, `計測後確認(${answer})`);
     if (answer === '#random-yes') await snap(page, testInfo, 'random-confirm');
     await page.click(answer);
     await expect(page.locator('#random-confirm')).toBeHidden();
     const row = page.locator('#record-body tr').first();
-    await expect(row.locator('td').nth(3)).toHaveText(`ランダム / ${outcome}`);
+    await expect(row.locator('td').nth(3)).toHaveText(`順序反復 / ${outcome}`);
     await expect(row.locator('td').nth(1)).toHaveText(/^\d+\.\d{3}$/);
-    await expect(page.locator('#random-progress')).toContainText(`残り試行回数${remaining}`);
+    await expect(page.locator('#random-progress')).toContainText(`残り試行数${remaining}`);
   }
 
   for (const r of await recordTags(page)) expect(r.chips).toEqual([['色', '白'], ['パターン', '縞']]);
   const stored = await storedSessions(page, roomId);
-  expect(stored.map((d) => [d.mode, d.randomOutcome, d.tags]).sort()).toEqual([
-    ['random', 'confirmed', ['パターン:縞', '色:白']],
-    ['random', 'discarded', ['パターン:縞', '色:白']],
+  expect(stored.map((d) => [d.mode, d.sequenceOutcome, d.tags]).sort()).toEqual([
+    ['sequence', 'confirmed', ['パターン:縞', '色:白']],
+    ['sequence', 'discarded', ['パターン:縞', '色:白']],
   ]);
   const csv = await exportCsv(page);
-  expect(csv.map((r) => [r.mode, r.random_outcome, r.tags])).toEqual([
-    ['ランダム', '有効', 'パターン:縞; 色:白'],
-    ['ランダム', 'ランダム試行内のエラーデータ', 'パターン:縞; 色:白'],
+  expect(csv.map((r) => [r.mode, r.sequence_outcome, r.tags])).toEqual([
+    ['順序反復', '有効', 'パターン:縞; 色:白'],
+    ['順序反復', '順序反復試行内のエラーデータ', 'パターン:縞; 色:白'],
   ]);
   await snap(page, testInfo, 'random-done');
   expect(blocked).toEqual([]);

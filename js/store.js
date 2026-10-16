@@ -110,7 +110,7 @@ export function startSession(db, roomId, press, sessionId, { existingOnly = fals
 
     // 受領記録は計測記録と同時に作り、記録削除後も残す。
     // 応答喪失・再読込・別端末での削除があっても未送信と区別できる。
-    const received = press.mode === "random" ? await tx.get(receipt) : null;
+    const received = ["random", "sequence"].includes(press.mode) ? await tx.get(receipt) : null;
     if (existingOnly || received?.exists()) return { ok: false, code: "SESSION_MISSING" };
 
     if (activeId) return { ok: false, code: "ALREADY_RUNNING" };
@@ -122,6 +122,11 @@ export function startSession(db, roomId, press, sessionId, { existingOnly = fals
       mode: press.mode ?? "free",
       randomBatchId: press.randomBatchId ?? null,
       randomOutcome: null,
+      sequenceRunId: press.mode === "sequence" ? press.sequenceRunId : null,
+      sequenceTrial: press.mode === "sequence" ? press.sequenceTrial : null,
+      sequenceSet: press.mode === "sequence" ? press.sequenceSet : null,
+      sequencePosition: press.mode === "sequence" ? press.sequencePosition : null,
+      sequenceOutcome: null,
       startMs: press.at,
       startRawMs: press.rawAt,          // 補正前(端末の生の Date.now())
       startOffsetMs: press.offsetMs,
@@ -139,7 +144,7 @@ export function startSession(db, roomId, press, sessionId, { existingOnly = fals
       durationMs: null,
       durationSec: null,
     });
-    if (press.mode === "random") tx.set(receipt, { startedBy: press.uid });
+    if (["random", "sequence"].includes(press.mode)) tx.set(receipt, { startedBy: press.uid });
     tx.set(cur, { activeSessionId: sessionId, updatedAt: serverTimestamp() });
     return { ok: true, id: sessionId };
   });
@@ -412,6 +417,21 @@ export function decideRandomSession(db, roomId, id, outcome) {
     if (data.randomOutcome === outcome) return;
     if (data.randomOutcome != null) throw new Error("この記録は既に判定されています。");
     tx.update(target, { randomOutcome: outcome });
+  });
+}
+
+export function decideSequenceSession(db, roomId, id, outcome) {
+  return runTransaction(db, async (tx) => {
+    const target = sessionRef(db, roomId, id);
+    const snap = await tx.get(target);
+    const data = snap.exists() ? snap.data() : null;
+    if (!data || data.status !== "done" || data.mode !== "sequence"
+        || data.startedBy == null || !["confirmed", "discarded"].includes(outcome)) {
+      throw new Error("判定対象の記録を確認できません。");
+    }
+    if (data.sequenceOutcome === outcome) return;
+    if (data.sequenceOutcome != null) throw new Error("この記録は既に判定されています。");
+    tx.update(target, { sequenceOutcome: outcome });
   });
 }
 
