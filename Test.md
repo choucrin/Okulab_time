@@ -939,3 +939,92 @@ Review・Testの未解決の重要項目・指摘項目は0件です。変更し
 - 未検証: Firestoreルールの実評価（EmulatorまたはRules Playground）と、実Firebaseでの端末間同期は未検証です。E2Eはスタブを使用し、ルールは静的検査のみです。
 - 未検証: Hosting/Firestoreルールの配信とafter-mergeでの確認は、自動工程の範囲外のため実施していません。
 - 未検証: 長文の内容は前回の機械検査と抜き取りの確認のみで、全文は精読していません（本文は前回から変更なし）。
+
+## 2026-10-17 / test / 周回1(v.04.1・F-14 読み物の手動切替・段落字下げ・ルームID入室)
+
+- 実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+- 対象コミット: eacb753ebcb9a70215a448311175eae95399286b(開始コミット ff166d43bc8abc17fb1a104b79148f425d6f4f5a)。アプリ本体は Review 3周の固定候補 11597048 と同一(差分は Review.md のみ)
+- 環境: WSL2 Ubuntu(Linux 6.18)、Node.js v24.21.0、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。Firebase は E2E スタブ(本番接続・書き込みなし。外部通信は遮断して `blocked` で検査)。iPhone・iPad・Windows 実機なし、Firestore Emulator なし
+- 参照: RSD.md F-14・A-47〜A-66、Review.md(e107e91 / 8aa08ee / 1159704 で3周完了、各周の指摘0件。旧期待値のE2E 2件は Test で更新するよう引き継ぎ)
+
+### 追加・変更したテストコード(再レビュー対象)
+
+| ファイル | 内容 |
+|---|---|
+| `test/room-reading-v041.test.mjs`(新規・11件) | 実ソースを切り出して vm で実行。`parseRoomId`(大小文字・前後の半角/全角空白・空・6/39/41桁・`g`・全角・`/`・`\`・`..`・内部空白・`room ` 接頭辞)、`deriveRoomId` の固定値(変更前 ff166d4 の式で算出)、40桁16進の合言葉を再解釈しないこと、`parseRoomId(deriveRoomId(P))` の一致、`#input-room` に `maxlength` 無し、入室方式がラジオボタンだけで決まること、`onDetect` が文章選択・スクロールを触らないこと、被験者用画面に文章変更・ルームID欄が無いこと、`text-indent:1em` が `.reading__text p` だけにあること・原文先頭に空白が無いこと、表示中の文章の保存・復元(F-14-1-6: 再読み込みで同じ文章・既出記録を変えない、未知ID・型違い・範囲外・破損JSONの無視、破損値を上書きしない、他データセット・他ルームの値を変えない) |
+| `e2e/v041.spec.cjs`(新規・6条件×8件) | F-14-7 の E2E 1〜14(下表) |
+| `e2e/stubs/firebase-firestore.mjs` | テスト専用の失敗・遅延注入。`runTransaction` がそのページの `sessionStorage` の `__okulab_e2e_tx_fault__` を参照する(未設定なら従来どおり) |
+| `e2e/reading.spec.cjs` | 旧期待値の更新(下記対応表) |
+| `e2e/okulab-time.spec.cjs` | 版数の期待値 `v.04.0`→`v.04.1`。A-24 の `details summary` が新設の `#room-id-panel` と2件一致して strict mode 違反になったため、`summary` を「ラベルカタログを編集」に限定(検査内容は不変) |
+
+旧期待値の対応表(F-14-7。検証の削除・弱体化はしていない):
+
+| 変更前の観点 | 変更後 | 旧観点の移し先 |
+|---|---|---|
+| `reading.spec.cjs`: 停止押下後に本文が変わる(`not.toHaveText(before)`)、`scrollTop === 0` | 停止押下で開始側が待機中に戻り記録が1件になり、本文が押下前と同一、`scrollTop` が押下前の値のまま | 「新しい文章を先頭から表示」は `v041.spec.cjs` の手動変更(本文が変わり `scrollTop === 0`・既出キーに追加)へ移した |
+| 被験者用画面に状態語が出ない | 維持 | — |
+
+### 実行コマンドと結果(対象コミット + 上記テスト変更の作業ツリー)
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功(版数 v.04.1 一致を含む)。ログ `/tmp/aa6-verify.log` |
+| `node --test` | 0 | 133件成功(既存122+新規11)、失敗・スキップ・中断0。ログ `/tmp/aa6-unit.log` |
+| `devflow-browser`(`DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-test-browser`) | 1 | **108件中102件成功・6件失敗**(失敗は6条件すべての A-61。下記 T-v041-001)。18.4分。成果物 `/tmp/aa6-test-browser/results.json`、`html/index.html`、`test-results/`。ログ `/tmp/aa6-test-browser.log` |
+| `git diff --check` | 0 | 成功(新規ファイルも行末空白なしを確認) |
+| `node tools/audit-passages.mjs` | 0 | 成功。長文10題すべて10,000字以上、`repeatedGroupCount: 0`。ログ `/tmp/aa6-audit.log` |
+
+補足の実行(必須外):
+- 1回目の全件実行では、上記 A-24 のセレクタ問題で6件が追加で失敗した。修正後に `devflow-browser --workers=2 -g "A-24"`(`/tmp/aa6-a24`)で12件成功し、最終の全件実行でも成功した。
+- `/tmp/aa6-check`(作業ツリーの一時コピー。リポジトリ外)で、A-61 から「予期しないエラー」の否定だけを除いた版を Chromium・iPhone 13 縦で実行し、2件成功した。拒否・未入室・`okulab-time/session` 未保存・方式切替時の消去は満たしている。
+- 同じ一時コピーで、「文章を変更」押下後の結果表示が3秒後も残ることを確認した(Chromium)。
+
+### 受け入れ条件との対応(E2E は WebKit iPhone 13 縦横・iPad Pro 11 縦横・iPhone SE 320px、Chromium Desktop の6条件)
+
+| 条件 | 検証 | 結果 |
+|---|---|---|
+| A-47・A-49 停止で本文・`scrollTop` 不変、計測終了・記録(経過時間)に反映 | v041 E2E-1、reading.spec | 成功 |
+| A-48 待機中の押下・連打・通信失敗(スタブで `permission-denied`)で不変、被験者用画面の表示・トースト変化なし、失敗は実験者用画面に計数 | v041 E2E-1 | 成功 |
+| A-50・A-52 切替だけ・往復で本文と `scrollTop` を保持、被験者用画面のまま再読み込みで同じ文章 | v041 E2E-1、単体 F-14-1-6 | 成功 |
+| A-51 手動変更→被験者用画面で新しい文章を先頭から、既出キーに追加 | v041 E2E-1・E2E-2・旧短文 | 成功 |
+| A-53 計測中・終了処理中(送信遅延)は無効で理由表示、`disabled` を外したクリックでも変わらない。順序反復の保存状態・進捗表示・記録・`meta/current` を変えない | v041 E2E-1・順序反復 | 成功 |
+| A-54・A-55 字下げ = 段落の文字サイズ(±0.5px)、1行目先頭は約1文字右・2行目先頭は内容左端(±1.5px)、文字サイズ変更に追従、本文以外は 0px、表示文字列 = 原文 | v041 字下げ、単体 | 成功 |
+| A-56 旧短文で字下げ・停止で不変・手動変更・保存値の分離 | v041 旧短文 | 成功 |
+| A-57・A-60・A-64 合言葉の端末と、大文字化・前後空白付きのルームIDの端末が同じルームに入り、開始・終了・記録が相互反映。再読み込みで復帰、退出でID欄を消去、閲覧のみ・計測開始でも入室 | v041 ルームID | 成功 |
+| A-58・A-59 合言葉の正規化と固定値、40桁16進の合言葉を再解釈しない | 単体、v041 ルームID | 成功 |
+| A-61 空・6/39/41桁・不正文字・`/`・`room ` 接頭辞・全角を拒否し、入室・保存しない | v041 A-61、単体 | **失敗(T-v041-001)**。拒否自体は成功 |
+| A-62 完全なIDと省略表示の区別、コピー成功(Chromium は実クリップボード、WebKit は API 差し替え)、失敗時・API 無しで全選択と案内 | v041 A-62 | 成功 |
+| A-63 被験者用画面に文章変更・ルームID・省略表示・新しい説明なし | v041 E2E-1、単体 | 成功 |
+| A-65 320/375/390px と各条件で参加画面(両方式・エラー時)・実験者用画面(ID欄展開)・被験者用画面のはみ出し・主要操作の重なりなし | v041 A-65 | 成功 |
+| A-66 必須コマンドと維持対象の回帰 | 上表 | `devflow-browser` が A-61 で失敗 |
+
+### 指摘事項
+
+- 重要項目: 0件。
+- **指摘項目 T-v041-001(A-61・F-14-4)**: ルームID方式の入力エラーが、想定外エラーの文言で表示される。`parseRoomId`(`js/store.js`)が `userMessage` を持たない素の `Error` を投げ、`onJoin`(`js/app.js`)が `describeError` に渡すため、`#join-error` に例えば「予期しないエラーが発生しました。ページを再読み込みしてください。(詳細: ルームIDを入力してください。)」と表示される。あわせて `console.error` に「想定外のエラー」と出力される。入力の誤りなのに再読み込みを指示する点で、要件「入力エラーは分かりやすく表示」と RSD F-14-4 の文言例(「ルームIDを入力してください。」等をそのまま表示)を満たさない(最長の桁数案内は77字で、詳細部の120字の切り詰めには掛からない)。拒否・未入室・未保存は正しく動作する。全6条件で再現。成果物 `/tmp/aa6-test-browser/test-results/v041-A-61-*/`。修正案: `parseRoomId` で `deriveRoomId` と同じく `userMessage` 付きのエラー(`userError` 相当)を投げる。または `onJoin` でルームID方式の検証エラーの `message` をそのまま表示する。修正後は `e2e/v041.spec.cjs` の A-61 が無修正で通ること。
+- 軽微項目: 新規なし。T-v040-001・T-v040-002 は前回から継続(今回の全件実行では順序反復E2Eは成功)。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows 実機。Ubuntu WebKit の端末エミュレーションは実機合格ではない。iOS のクリップボード・長押し選択、ソフトウェアキーボード表示時の参加画面も未確認。
+- 実 Firebase での端末間同期と Firestore ルールの実評価(今回 `firestore.rules` は未変更)。E2E はスタブを使用。
+- 配信・after-merge の確認(自動工程の範囲外)。
+
+### 結論
+
+**不合格**。必須チェック5件はすべて実行した。`devflow-browser` が A-61(T-v041-001)の6件で失敗したため、指摘項目1件を Development へ返す。テストコードとスタブを変更したため、修正後は Review 3周 → Test に戻る。次回の Test では、本記録のテストを変更せずに再実行する想定である。
+
+<!-- devflow:aa6a3c67-3b6f-4514-a43f-bbc292ed21e7:test:3:eacb753ebcb9a70215a448311175eae95399286b -->
+
+
+## 2026-10-17T09:24:11.285986+00:00 / test / 周回3
+実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+対象コミット: eacb753ebcb9a70215a448311175eae95399286b
+
+v.04.1（eacb753）の Test 工程は完了し、判定は不合格です。必須チェック5件はすべて実行しました。整合性9項目、単体133件、空白検査、本文監査は成功しました。devflow-browser は108件中102件が成功し、6件が失敗しました。失敗はすべて A-61 で、6条件それぞれで1件ずつ発生しています。原因はアプリ不具合 T-v041-001 で、ルームIDの入力エラーが想定外エラーとして表示されます。この指摘項目1件を Development へ返します。Test 担当で残っている作業はありません。前回継続から状態に変化はなく、テスト変更は作業ツリーに残っています。変更したのは次の6ファイルで、再レビューの対象です: test/room-reading-v041.test.mjs、e2e/v041.spec.cjs、e2e/stubs/firebase-firestore.mjs、e2e/reading.spec.cjs、e2e/okulab-time.spec.cjs、Test.md。修正後は Review を3周したうえで、同じテストを変更せずに再テストします。A-61 以外の A-47〜A-65 は成功しました。詳細は Test.md の「v.04.1・F-14」の節に記録しています。
+- issue: T-v041-001（A-61・F-14-4）: ルームID方式の入力エラーが想定外エラーの文言で表示されます。parseRoomId（js/store.js）が userMessage を持たない素の Error を投げ、onJoin（js/app.js）がそれを describeError に渡しています。そのため #join-error に「予期しないエラーが発生しました。ページを再読み込みしてください。(詳細: ルームIDを入力してください。)」のような文言が出て、console.error にも想定外エラーとして記録されます。入力の誤りなのに再読み込みを指示しており、「入力エラーを分かりやすく表示する」要件と RSD F-14-4 の文言例を満たしません。拒否自体は正しく動作し、入室せず okulab-time/session も保存されません。6条件すべてで再現しました。成果物は /tmp/aa6-test-browser/test-results/v041-A-61-*/ です。修正案: parseRoomId が deriveRoomId と同じく userError 相当（userMessage 付き）のエラーを投げるようにします。修正後は e2e/v041.spec.cjs の A-61 がテストを変更せずに通ることを確認してください。
+- 未検証: devflow-browser（DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-test-browser）は終了コード1で、102件成功・6件失敗（6条件すべての A-61）でした。成果物は /tmp/aa6-test-browser/results.json、html/index.html、test-results/、ログは /tmp/aa6-test-browser.log です。
+- 未検証: E2E は Ubuntu 上の WebKit/Chromium による端末エミュレーションで、Firebase はスタブです。iPhone・iPad・Windows の実機は未検証です。iOS のクリップボード、長押しでの選択、ソフトウェアキーボード表示時の挙動も確認していません。
+- 未検証: 実 Firebase での端末間同期と、Firestore ルールの実評価は未検証です。firestore.rules は変更されていません。本番 Firebase への書き込みは行っていません。
+- 未検証: 配信と after-merge の確認は、この自動工程の範囲外のため実施していません。
+- 未検証: Test でテストコードとスタブを変更したため、修正後の候補は Review を3周してから再テストする必要があります。

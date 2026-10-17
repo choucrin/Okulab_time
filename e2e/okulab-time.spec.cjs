@@ -79,7 +79,7 @@ for (const [condition, catalog] of [['カタログ無し(カタログを持た�
     const roomId = await seed(page, appServer, { catalog, passphrase, sessions: SESSIONS.map((s) => s.doc) });
     await join(page, appServer, { passphrase, role: 'start' });
     await expect(page.locator('#record-body tr')).toHaveCount(SESSIONS.length);
-    await expect(page.locator('#version')).toHaveText('v.04.0');
+    await expect(page.locator('#version')).toHaveText('v.04.1');
 
     // A-25: 見出しとセルの対応
     const headings = await page.locator('.table thead th').allTextContents();
@@ -169,10 +169,10 @@ test('A-24: 計測者画面の全状態でページ全体が画面幅を超え�
   await expect(page.locator('#record-empty')).toBeVisible();
   await check('記録0件・任意方式');
   await page.locator('#catalog-options label', { hasText: LONG_ITEM }).locator('input').check();
-  await page.locator('details summary').click();
+  await page.locator('summary', { hasText: 'ラベルカタログを編集' }).click();
   await expect(page.locator('#catalog-editor')).toBeVisible();
   await check('カタログ編集表示中');
-  await page.locator('details summary').click();
+  await page.locator('summary', { hasText: 'ラベルカタログを編集' }).click();
 
   await page.locator('#measurement-mode').check();
   await expect(page.locator('#random-presets')).toBeVisible();
