@@ -774,3 +774,88 @@ E2EはiPhone 13縦横、iPad Pro 11縦横、Desktop Chromium、幅320px WebKit�
 - 未検証: 管理側による候補コミットの確定、Review3周、独立Testは次工程です。
 - 未検証: iOS・iPadOS・Windows実機、実Firebase同期、Firestoreルール実評価は未実施です。
 - 未検証: 本番配信・PRマージは実施していません。
+
+## 2026-10-17 / Development 周回2: ブラウザE2E起動失敗の調査
+
+- 実行ID: `0649cd48-1434-4578-bc30-2367715b1b18`
+- 対象コミット: `e9a8b419d3788492f72fa99cde15824584d1f549`、開始コミット: `aa3d61657be04b623a88631af7f2cf6018be1f61`
+- 引き継ぎID: `0649cd48-1434-4578-bc30-2367715b1b18:develop:2:browser-output-blocked`
+- 調査対象: 直前の「必須検証失敗: ブラウザE2E (exit 1)」。RSD.md、Review.md、Test.md、TASKS.mdと共通ブラウザ手順を参照。
+
+### 動作確認結果
+
+| コマンド | 結果 |
+|---|---|
+| `node tools/verify.js` | 終了0、整合性9項目成功。版数v.04.0一致 |
+| `node --test` | 終了0、122件成功、失敗・スキップ・中断0。ログ `/tmp/okulab-develop-cycle2-unit.log` |
+| `devflow-browser` | 終了1。60件・2ワーカーの実行開始表示後、WorkerHost.startの成果物ディレクトリ作成でENOENT。テスト本体の成否は未確認 |
+| `git diff --check` | 終了0 |
+
+ブラウザ実行時の `DEVFLOW_BROWSER_OUTPUT` は `/home/choucrin/projects/.automation-runs/browser-artifacts/3de27715a2ec0f2015f1`。失敗箇所は同ディレクトリ直下の `test-results` のmkdir。今回の書き込み許可は対象worktreeと `/tmp` のみで、管理側指定の成果物ディレクトリは許可範囲外。承認ポリシーもneverであり、このセッションでは権限の追加や管理領域の修正はできない。アプリの不具合を示す失敗ではなく、実行環境の前提不成立としてblockedを返す。成果物生成の完了やE2E合格は報告しない。
+
+### 変更と引き継ぎ
+
+- 変更は本記録のみ。アプリ・テスト・設定と指定4文書は未変更。依頼単位で既に更新済みのv.04.0を維持し、環境失敗の調査だけで追加増分を作らない。
+- 次の担当は進行管理。上記成果物出力先を書き込み可能にするか、許可された専用出力先を実行設定で指定してから、同じ候補で必須ブラウザE2Eを再実行すること。本記録は送達・次工程の開始を意味しない。
+- Test.mdは指示により変更していない。独立Test担当が再実行時の対象・コマンド・成果物・未検証範囲を記録する。
+- 未検証: 今回のブラウザE2E全60件。iOS/iPadOS・Windows実機、実Firebase同期、Firestoreルールの実評価も未実施。Ubuntu WebKitは実機確認に相当しない。
+- Gitの変更操作、別CLI起動、本番書き込み、公開・配信・課金は実施していない。
+
+## 2026-10-17 / Development 周回2再開: ブラウザE2E同期不備の修正
+
+- 実行ID: `0649cd48-1434-4578-bc30-2367715b1b18`
+- 対象コミット: `e9a8b419d3788492f72fa99cde15824584d1f549`、開始コミット: `aa3d61657be04b623a88631af7f2cf6018be1f61`
+- 対応指摘: 必須ブラウザE2E失敗（ipad-landscape、順序反復の再試行後に `#random-confirm` が非表示）。前節の出力先blockedは、ユーザ指定の `mktemp -d` による `/tmp` 専用出力先で解消。管理領域の権限・共通機構は変更していない。
+
+### 原因の切り分けと修正
+
+`startSequence` はローカルへpendingを予約した後に `startMeasurement` を呼び、開始トランザクションを送る。元のE2Eはクリックの完了とローカルの予定試行番号だけを待って別タブの終了ボタンを押していた。これはサーバー上で開始済みであることを保証しない。もう一方のテストの再試行分岐は、開始クリック直後に待機なしで終了を押していた。終了ボタンが待機中にも押せるのはRSD F-4-3の仕様であり、enabledは開始通知を受けた根拠にはならない。開始より先に終了リクエストが処理されるとNOT_RUNNINGとなり、後で開始した計測はrunningのまま残り、保存確認も表示されない。
+
+`e2e/sequence-development.spec.cjs` に `startAndWait` を追加。終了側が直前の待機状態に戻ったことを確認してから開始し、両画面が計測中になったことを待って終了操作を行う。両テストの全開始経路（再試行を含む）に適用した。試行数、保存判定、確認画面、再読み込み、二重消費防止の期待値を維持。スキップ・リトライ・タイムアウトの緩和や固定sleepの追加はない。アプリ本体・スタブ・配信設定は変更していない。同一依頼単位の更新済みv.04.0を維持する。
+
+### 再現と比較の動作確認
+
+すべて `mktemp -d /tmp/okulab-cycle2-…-XXXXXX` で作った専用ディレクトリを `DEVFLOW_BROWSER_OUTPUT` に指定した。Firebaseはローカルストレージベースのスタブ、配信は127.0.0.1、その他の外部通信は遮断。本番書き込みなし。
+
+| 対象・コマンド（共通接頭辞 `DEVFLOW_BROWSER_OUTPUT=<専用出力先>`） | 結果・成果物 |
+|---|---|
+| 修正前 `devflow-browser sequence-development.spec.cjs --project=ipad-landscape --repeat-each=3` | 終了0、6件成功。通常速度では再現せず。`/tmp/okulab-cycle2-reproduce-RBy2fk` |
+| 診断用 `devflow-browser sequence-diagnostic.spec.cjs --project=ipad-landscape --grep '記録しないで'`、修正前・再試行の開始送信を2秒遅延 | 終了1、1件失敗。`/tmp/okulab-cycle2-retry-before-cKvwvL` |
+| 上記と同じ診断条件、同期修正後 | 終了0、1件成功。`/tmp/okulab-cycle2-retry-after-ib60RH` |
+
+再現ではスタブの `runTransaction` がWeb Lockを取得する前に、開始用コールバック（`tx.set(receipt` を含む）の2回目以降だけ2秒遅延させた。ロック内の遅延では終了まで直列化されるため、この競合の再現にはならない。修正前traceでは `#random-no` 押下後、2回目の開始・終了が実行され、その後の確認表示が5000msで失敗した。error-contextは「実際の計測1回」「有効0回」「1件目はエラーデータ」「2件目は計測中」を示し、同じ予定位置の再試行後の非表示を再現した。修正後は同じ遅延を加えても再試行・有効確定を完了した。
+
+各出力先の `run.log`、`results.json`、`html/index.html`、`test-results/`（trace・画像、失敗時video）を参照。診断用の一時specは最終検証前にworktreeから除去。比較用ソースは `/tmp/okulab-cycle2-diagnostic-before.cjs` と `/tmp/okulab-cycle2-diagnostic-after.cjs` に保持（再実行する場合はe2e内へ診断用specとして配置し、検証後に除去）。初回の送信も遅延する別の診断でも修正前の同じ非表示を再現したが、上表は報告された再試行に絞った比較結果である。
+
+### 最終の必須検証とReviewへの引き継ぎ
+
+診断用spec除去後、修正済みE2Eを含む最終作業ツリーで以下を実行した。E2E実行開始後にアプリ・テスト・設定は変更していない。
+
+| 必須検証 | 結果・成果物 |
+|---|---|
+| `node tools/verify.js` | 終了0、9項目成功、v.04.0整合。`/tmp/okulab-cycle2-final-verify.log` |
+| `node --test` | 終了0、122件成功、失敗・スキップ・中断0。`/tmp/okulab-cycle2-final-unit.log` |
+| `DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-cycle2-final-browser-7Nqnag devflow-browser` | 終了0、60件成功（6条件×10件）、expected 60 / unexpected 0 / skipped 0 / flaky 0、15.2分。出力先はmktempで作成した専用ディレクトリ |
+| `git diff --check` | 記録追記後も終了0 |
+| `git diff --quiet -- TASKS.md RSD.md Review.md Test.md` | 終了0、指定4文書は未変更 |
+
+全件E2Eの対象はiPhone 13縦横、iPad Pro 11縦横、Desktop Chromium、幅320px WebKit。実アプリをローカル配信し、Firebaseはスタブを使用した。成果物は `/tmp/okulab-cycle2-final-browser-7Nqnag/results.json`、`html/index.html`、`test-results/`、実行ログは同出力先の `run.log`。iPad横向きの順序反復再試行・再読み込み・別タブ競合も成功した。前節の出力先blockedと報告されたE2E失敗は本再開で対応済み。ただしDevelopmentの動作確認であり、独立したReview・Testの合格判定を代替しない。
+
+引き継ぎID: `0649cd48-1434-4578-bc30-2367715b1b18:develop:2:browser-sync-fixed`。案件Okulab_time、現在工程Development、次担当は管理側が起動するReview（修正候補を固定して3周）、続いてClaude Codeの独立Test。対象ブランチ・候補コミットの確定と送達は管理側が実行する。基点は `e9a8b419d3788492f72fa99cde15824584d1f549`、変更成果物は `e2e/sequence-development.spec.cjs` と `DevelopProgress.md`。Gitの変更操作、別CLI起動、公開・配信・課金は実施していない。
+
+未検証・後続への依頼:
+
+- 修正候補のReview3周と独立Testは未実施。Test.mdは変更禁止のため、Test担当が独立検証の対象・コマンド・成果物パス・未検証範囲を追記すること。
+- Ubuntu WebKitは端末エミュレーションであり、iOS/iPadOS・Windows実機の合格ではない。実Firebaseの2端末同期とFirestoreルールエンジンの実評価も未検証。今回のPR提出前は任意とするTASKS.mdの扱いを維持する。
+- 本番公開・配信、PR作成・承認・マージは未実施。HostingとFirestoreルールの配信要否は、ユーザのマージ後、別の明示承認付きセッションで確認する。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:develop:1:e9a8b419d3788492f72fa99cde15824584d1f549 -->
+
+
+## 2026-10-17T02:38:04.499740+00:00 / develop / 周回1
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: e9a8b419d3788492f72fa99cde15824584d1f549
+
+開始送信の遅延で再試行後の確認画面非表示を再現し、E2Eの同期不備と切り分けました。両画面の計測開始完了を待つよう修正し、必須検証4件すべて成功。E2Eは60件成功です。成果物は/tmp/okulab-cycle2-final-browser-7Nqnag、詳細とReview引き継ぎはDevelopProgress.mdに記録しました。版数v.04.0を維持し、指定4文書は未変更です。
+- 未検証: 修正候補のReview3周と独立Testは管理側の後続工程です。
+- 未検証: iOS・iPadOS・Windows実機、実Firebase同期、Firestoreルール実評価は未実施です。

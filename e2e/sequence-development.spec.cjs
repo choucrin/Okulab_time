@@ -1,5 +1,16 @@
 // Development の動作確認。Test 工程の受け入れ検証を代替しない。
 const { test, expect, seed, join } = require('./support/harness.cjs');
+
+// 開始予約のlocalStorage保存は開始トランザクションの確定より先に行われる。
+// 別タブの終了操作は、直前の待機状態から新しい計測への通知を受けた後に行う。
+// ボタンは待機中にも押せる仕様なので、クリック完了やenabledだけでは同期できない。
+async function startAndWait(page, end) {
+  await expect(end.locator('#status-label')).toHaveText('待機中');
+  await page.click('#btn-start');
+  await expect(page.locator('#status-label')).toHaveText('計測中');
+  await expect(end.locator('#status-label')).toHaveText('計測中');
+}
+
 test('順序反復: 記録しないで同じ位置を再試行し、有効確定後にだけ進む', async ({ page, context, appServer }) => {
   const passphrase = 'sequence-development';
   const room = await seed(page, appServer, { passphrase, catalog: [{ name: '色', items: ['白', '赤'] }] });
@@ -16,7 +27,7 @@ test('順序反復: 記録しないで同じ位置を再試行し、有効確定
   const end = await context.newPage();
   await join(end, appServer, { passphrase, role: 'end' });
   for (const [choice, done, attempts] of [['random-no', 0, 1], ['random-yes', 1, 2], ['random-yes', 2, 3]]) {
-    await page.click('#btn-start');
+    await startAndWait(page, end);
     await expect.poll(async () => (await saved()).pending?.payload.sequenceTrial).toBe((await saved()).done + 1);
     await end.click('#btn-end');
     await expect(page.locator('#random-confirm')).toBeVisible();
@@ -33,7 +44,8 @@ test('順序反復: 確認待ちを再読み込みし、別タブの逆回答で
  const passphrase='sequence-resume',room=await seed(page,appServer,{passphrase,catalog:[{name:'色',items:['白']}]});
  await join(page,appServer,{passphrase,role:'start'});await page.locator('#measurement-mode').check();await page.click('#random-open');
  await page.locator('#random-options input').check();await page.click('#random-add');await page.click('#random-import');
- await page.click('#btn-start');const end=await context.newPage();await join(end,appServer,{passphrase,role:'end'});
+ const end=await context.newPage();await join(end,appServer,{passphrase,role:'end'});
+ await startAndWait(page,end);
  await end.click('#btn-end');await expect(page.locator('#random-confirm')).toBeVisible();
  const saved=()=>page.evaluate(key=>JSON.parse(localStorage.getItem(key)),'okulab-time/sequence/'+room);
  const pending=(await saved()).pending;
@@ -47,7 +59,7 @@ test('順序反復: 確認待ちを再読み込みし、別タブの逆回答で
  expect(['confirmed','discarded']).toContain(outcome);expect((await saved()).done).toBe(outcome==='confirmed'?1:0);
  expect((await saved()).pending).toBeNull();
  if(outcome==='discarded'){
-  await page.click('#btn-start');await end.click('#btn-end');await expect(page.locator('#random-confirm')).toBeVisible();await page.click('#random-yes');
+  await startAndWait(page,end);await end.click('#btn-end');await expect(page.locator('#random-confirm')).toBeVisible();await page.click('#random-yes');
   await expect.poll(async()=>(await saved()).done).toBe(1);
  }
  expect((await saved()).status).toBe('completed');await expect(page.locator('#measurement-mode')).not.toBeChecked();
