@@ -42,8 +42,13 @@
     <p class="lede">2端末で計測開始・終了を送信し、経過時間を記録します。</p>
 
     <form id="join-form" novalidate>
+      <fieldset class="join-methods">
+        <legend class="field__label">入室方法</legend>
+        <label><input type="radio" name="join-method" value="passphrase" checked> 合言葉で入室</label>
+        <label><input type="radio" name="join-method" value="roomId"> ルームIDで入室</label>
+      </fieldset>
       <div class="field">
-        <label class="field__label" for="input-room">合言葉(ルームキー)</label>
+        <label class="field__label" for="input-room" id="room-input-label">合言葉(ルームキー)</label>
         <div class="input-row">
           <input type="password" id="input-room" name="room"
                  autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
@@ -51,7 +56,7 @@
           <button type="button" class="btn btn--ghost btn--sm" id="btn-reveal"
                   aria-pressed="false">表示</button>
         </div>
-        <span class="field__hint">同じ合言葉を入力した端末どうしがペアになります(大文字小文字は区別しません)。</span>
+        <span class="field__hint" id="room-input-hint">同じ合言葉を入力した端末どうしがペアになります(大文字小文字は区別しません)。</span>
       </div>
 
       <fieldset class="roles">
@@ -198,6 +203,8 @@
         <span class="bigbtn__title">計測終了</span>
         <span class="bigbtn__sub" id="end-sub">接続中…</span>
       </button>
+      <button type="button" class="btn btn--ghost switch-ui" id="btn-change-passage">文章を変更</button>
+      <p id="passage-change-hint" class="muted" role="status"></p>
       <button type="button" class="btn btn--ghost switch-ui" id="btn-participant">
         被験者用の画面に切り替える
       </button>
@@ -218,6 +225,14 @@
     </button>
 
     <!-- 履歴 -->
+    <details id="room-id-panel">
+      <summary>ルームID(参加用)</summary>
+      <p>別の端末で「ルームIDで入室」を選び、この40桁を入力すると同じルームに入れます。合言葉と同じく参加用の情報として扱ってください。画面上部の room の6桁は省略表示で、入室には使えません。</p>
+      <label for="room-id-full">完全なルームID</label>
+      <input id="room-id-full" type="text" readonly autocomplete="off" spellcheck="false">
+      <button type="button" class="btn btn--ghost" id="btn-copy-room-id">コピー</button>
+      <p id="room-id-copy-status" role="status"></p>
+    </details>
     <section class="records">
       <div class="records__head">
         <h2 class="records__title">記録 <span class="count" id="record-count">0</span></h2>
@@ -270,7 +285,7 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.04.0</p>
+<p class="version" id="version">v.04.1</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

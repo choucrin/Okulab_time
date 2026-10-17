@@ -75,6 +75,19 @@ export async function deriveRoomId(passphrase) {
     .slice(0, 40);
 }
 
+/** 正式な参加用ルームIDを検証する。合言葉の変換とは独立。 */
+export function parseRoomId(input) {
+  const value = typeof input === "string" ? input.trim() : "";
+  if (!value) throw new Error("ルームIDを入力してください。");
+  if (!/^[0-9a-f]+$/i.test(value)) {
+    throw new Error("ルームIDに使えるのは半角の 0〜9 と a〜f だけです。");
+  }
+  if (value.length !== 40) {
+    throw new Error(`ルームIDは40桁です(入力は ${value.length} 桁)。画面上部の room の6桁は省略表示です。実験者用画面の「ルームID(参加用)」の40桁を入力してください。`);
+  }
+  return value.toLowerCase();
+}
+
 const currentRef  = (db, roomId) => doc(db, "rooms", roomId, "meta", "current");
 const sessionsCol = (db, roomId) => collection(db, "rooms", roomId, "sessions");
 const sessionRef  = (db, roomId, id) => doc(db, "rooms", roomId, "sessions", id);

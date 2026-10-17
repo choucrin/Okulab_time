@@ -11,13 +11,13 @@ import { ClockSync } from "./clock.js";
 import { sequenceInteger, validateSequence, sequencePosition, validateSequenceRun, settleSequenceRun } from "./sequence.js";
 import { readingDataset, validShown, selectReading } from "./reading.js";
 import {
-  deriveRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
+  deriveRoomId, parseRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
   collectDeletable, deleteSessions, isUncertain, SESSION_LIMIT,
   decideRandomSession, decideSequenceSession, subscribeRandomSession,
 } from "./store.js";
 
-export const APP_VERSION = "v.04.0";
+export const APP_VERSION = "v.04.1";
 
 const CATALOG_KEY = "okulab-time/catalog";
 let catalog = [];
@@ -142,6 +142,11 @@ let participantFailures = 0;    // 被験者用画面で記録できなかった
 let participantUnknown = 0;     // 送ったが結果を確認できなかった操作の数
 let recordsInFlight = 0;        // 走っている記録操作(書き出し・削除)の数
 let recordsOwner = 0;           // その操作の通し番号(後始末の横取りを防ぐ)
+const CURRENT_READING_KEY = "okulab-time/reading-current";
+const readingSet = READ_KEY.endsWith("/long") ? "long" : "short";
+const currentPassages = new Map();
+let passageScroll = 0;
+let passageChanged = false;
 const shownPassages = new Map();     // ルームごとの既出の文章(localStorage の代わりにもなる)
 const connErrors = new Map();        // 購読ごとの接続エラー
 
@@ -272,6 +277,15 @@ async function ensureAuth(errorNode) {
 function bindEvents() {
   el.joinForm.addEventListener("submit", onJoin);
   el.btnReveal.addEventListener("click", toggleReveal);
+  for (const radio of document.querySelectorAll('input[name="join-method"]')) {
+    radio.addEventListener("change", updateJoinMethod);
+  }
+  $("btn-change-passage").addEventListener("click", () => {
+    if (passageChangeReason()) return;
+    nextPassage();
+    $("passage-change-hint").textContent = "文章を変更しました。被験者用画面で先頭から表示します。";
+  });
+  $("btn-copy-room-id").addEventListener("click", copyRoomId);
   el.btnLeave.addEventListener("click", onLeave);
   el.btnCsv.addEventListener("click", exportCsv);
   el.btnClear.addEventListener("click", onClearAll);
@@ -304,6 +318,7 @@ function bindEvents() {
 //  ボタンは常に押せて、進行中の計測が無いときは黙って無視する。
 
 function setParticipant(on) {
+  if (state.participant && !on) passageScroll = el.passageText.parentElement.scrollTop;
   state.participant = on && state.role === "end";
   saveSession();
 
@@ -318,8 +333,10 @@ function setParticipant(on) {
 
   // 文字サイズの調整は、画面が表示されてからでないと寸法を測れない
   if (state.participant) {
-    if (el.passageText.textContent) fitPassage();
-    else nextPassage();
+    ensurePassage();
+    fitPassage();
+    el.passageText.parentElement.scrollTop = passageChanged ? 0 : passageScroll;
+    passageChanged = false;
   }
 }
 
@@ -408,14 +425,53 @@ function nextPassage() {
 
   const { passage, shown } = selectReading(READING_PASSAGES, readShown(roomId));
   writeShown(roomId, shown);
-  const paragraphs = passage.paragraphs.map((text) => {
+  currentPassages.set(roomId, passage.id);
+  try {
+    const raw = JSON.parse(localStorage.getItem(CURRENT_READING_KEY) ?? "{}");
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const previous = raw[readingSet];
+      raw[readingSet] = {
+        ...(previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {}),
+        [roomId]: passage.id,
+      };
+      localStorage.setItem(CURRENT_READING_KEY, JSON.stringify(raw));
+    }
+  } catch { /* 壊れた保存値や他ルームの内容を上書きしない。メモリ上では維持する */ }
+  displayPassage(passage);
+}
+
+function displayPassage(passage) {
+  el.passageText.replaceChildren(...passage.paragraphs.map((text) => {
     const p = document.createElement("p");
     p.textContent = text;
     return p;
-  });
-  el.passageText.replaceChildren(...paragraphs);
-  fitPassage();
-  el.passageText.parentElement.scrollTop = 0;   // 新しい文章は先頭から
+  }));
+  passageScroll = 0;
+  passageChanged = true;
+}
+
+function ensurePassage() {
+  if (el.passageText.textContent) return;
+  const room = state.roomId;
+  let id = currentPassages.get(room);
+  if (!currentPassages.has(room)) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CURRENT_READING_KEY) ?? "{}");
+      id = saved?.[readingSet]?.[room];
+    } catch { /* 初回選択へ */ }
+  }
+  const passage = READING_PASSAGES.find((p) => p.id === id);
+  if (passage) {
+    currentPassages.set(room, id);
+    displayPassage(passage);
+  } else nextPassage();
+}
+
+function passageChangeReason() {
+  if (state.role !== "end" || !state.roomId || !state.currentLoaded) return "接続を確認しています。";
+  if (state.busy || state.sending) return "処理中は文章を変更できません。";
+  if (state.activeId) return "計測中は文章を変更できません。計測の終了後に操作してください。";
+  return "";
 }
 
 /** 拡大した文字サイズを維持し、溢れた文章は枠内でスクロールする。 */
@@ -427,19 +483,8 @@ function fitPassage() {
   }
 }
 
-/**
- * 被験者用画面の「気づきを検出」
- *
- * 押したときの反応を、計測中かどうかで変えてはならない。
- * 変化の有無そのものが「いま計測が動いている」という手がかりになるため、
- * 成否にかかわらず、押した時点で必ず文章を切り替える。
- *
- * 送信も条件を付けずに行う。画面の状態がサーバーとずれている場合に
- * 押下を握りつぶすと、記録すべき「押した瞬間」を失うため。
- * 進行中の計測が無ければサーバー側が弾き、その結果は被験者には見えない。
- */
+/** 停止では本文とスクロール位置を維持し、押した時刻を従来どおり送る。 */
 async function onDetect(press) {
-  nextPassage();
   await onEnd(press);
 }
 
@@ -482,6 +527,33 @@ function bindPressButton(button, handler) {
   });
 }
 
+function updateJoinMethod() {
+  const byId = el.joinForm.querySelector('input[name="join-method"]:checked').value === "roomId";
+  el.inputRoom.value = "";
+  hideError(el.joinError);
+  if (el.inputRoom.type === "text") toggleReveal();
+  $("room-input-label").textContent = byId ? "ルームID(半角英数字40桁)" : "合言葉(ルームキー)";
+  el.inputRoom.placeholder = byId ? "正式なルームIDの40桁を入力" : "両方の端末で同じ文字列を入力";
+  $("room-input-hint").textContent = byId
+    ? "実験者用画面の「ルームID(参加用)」の40桁を入力します。画面上部の6桁は省略表示です。形式だけを確認し、ルームの存在は確認しません。"
+    : "同じ合言葉を入力した端末どうしがペアになります(大文字小文字は区別しません)。";
+}
+
+async function copyRoomId() {
+  const room = state.roomId, epoch = roomEpoch;
+  if (!room) return;
+  try {
+    await navigator.clipboard.writeText(room);
+    if (epoch === roomEpoch) $("room-id-copy-status").textContent = "コピーしました。";
+  } catch {
+    if (epoch !== roomEpoch) return;
+    $("room-id-full").focus();
+    $("room-id-full").select();
+    $("room-id-full").setSelectionRange(0, room.length);
+    $("room-id-copy-status").textContent = "自動でコピーできませんでした。選択されたIDを長押し(または Ctrl+C)でコピーしてください。";
+  }
+}
+
 function toggleReveal() {
   const revealed = el.inputRoom.type === "text";
   el.inputRoom.type = revealed ? "password" : "text";
@@ -498,13 +570,14 @@ async function onJoin(event) {
   const passphrase = el.inputRoom.value.trim();
   const role = el.joinForm.querySelector('input[name="role"]:checked')?.value;
 
-  if (!passphrase) return showError(el.joinError, "合言葉を入力してください。");
+  const byId = el.joinForm.querySelector('input[name="join-method"]:checked')?.value === "roomId";
+  if (!passphrase && !byId) return showError(el.joinError, "合言葉を入力してください。");
   if (!role) return showError(el.joinError, "この端末の役割を選んでください。");
 
   // 合言葉の変換は通信を伴わないので、認証より先に済ませる
   let roomId;
   try {
-    roomId = await deriveRoomId(passphrase);
+    roomId = byId ? parseRoomId(passphrase) : await deriveRoomId(passphrase);
   } catch (err) {
     return showError(el.joinError, describeError(err));
   }
@@ -546,6 +619,7 @@ function enterRoom(roomId, role, participant = false) {
 
   el.pillRole.textContent = ROLE_LABEL[role];
   el.pillRoom.textContent = "room " + roomId.slice(0, 6);
+  $("room-id-full").value = roomId;
   el.panelStart.hidden = role !== "start";
   el.panelEnd.hidden = role !== "end";
   el.btnParticipant.hidden = role !== "end";   // 被験者用画面は終了側の端末だけ
@@ -559,7 +633,14 @@ function enterRoom(roomId, role, participant = false) {
   clearActionError();
   render();
   showRoomScreen();
-  if (state.participant) nextPassage();   // 画面を出してから寸法を測る
+  passageScroll = 0;
+  passageChanged = false;
+  if (state.participant) {
+    ensurePassage();
+    fitPassage();
+    el.passageText.parentElement.scrollTop = 0;
+    passageChanged = false;
+  }
 
   clock = new ClockSync(db, ["rooms", roomId, "clock", state.uid]);
   clock.onChange = () => { renderClock(); renderControls(); };
@@ -780,6 +861,9 @@ function onLeave() {
 
 /** ルームに紐づく購読・タイマー・送信中の操作をすべて無効化する */
 function teardownRoom() {
+  $("room-id-full").value = "";
+  $("room-id-panel").open = false;
+  $("room-id-copy-status").textContent = "";
   stopRandom?.();
   stopRandom = null;
   stopSequence?.();
@@ -989,6 +1073,9 @@ function stopTicker() {
 }
 
 function renderControls() {
+  const reason = passageChangeReason();
+  $("btn-change-passage").disabled = Boolean(reason);
+  $("passage-change-hint").textContent = reason || "次に被験者用画面を開いたとき、新しい文章を先頭から表示します。";
   renderRandom();
   syncRecordsButtons();   // 計測中は一括削除も押せない。見た目を合わせる
   const ready = state.currentLoaded;
