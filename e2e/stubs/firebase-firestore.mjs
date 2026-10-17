@@ -120,9 +120,15 @@ export function writeBatch() {
   return batch;
 }
 
+// テストから通信失敗・遅延を注入する(このページの sessionStorage に置いた値だけを見る)。
+const FAULT_KEY = "__okulab_e2e_tx_fault__";
+
 export async function runTransaction(_db, updateFunction) {
   return navigator.locks.request(KEY + "/transactions", async () => {
   await sleep(10);
+  const fault = JSON.parse(sessionStorage.getItem(FAULT_KEY) ?? "null");
+  if (fault?.delayMs) await sleep(fault.delayMs);
+  if (fault?.code) throw Object.assign(new Error(`injected ${fault.code}`), { code: fault.code });
   const store = load();
   const writes = [];
   const tx = {

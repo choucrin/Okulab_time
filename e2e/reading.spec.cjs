@@ -1,6 +1,7 @@
 const {test,expect,seed,join} = require('./support/harness.cjs');
 
-test('長文: 枠内末尾・通知と回転で保持・スクロール後の終了操作と文章切替',async({page,context,appServer,blocked,isMobile})=>{
+// v.04.1(F-14-1-1): 停止押下で文章を変えない。旧観点「新しい文章が先頭から表示」は e2e/v041.spec.cjs の手動変更へ移した。
+test('長文: 枠内末尾・通知と回転で保持・スクロール後の終了操作で文章を維持',async({page,context,appServer,blocked,isMobile})=>{
  const passphrase='reading-long';await seed(page,appServer,{passphrase});await join(page,appServer,{passphrase,role:'end'});
  await page.click('#btn-participant');
  const text=page.locator('#passage-text');await expect(text.locator('p')).toHaveCount(30);
@@ -18,9 +19,10 @@ test('長文: 枠内末尾・通知と回転で保持・スクロール後の終
  await page.setViewportSize(size);
  const dims=await page.evaluate(()=>({html:document.documentElement.scrollHeight,body:document.body.scrollHeight,h:innerHeight}));
  expect(dims.html).toBeLessThanOrEqual(dims.h+1);expect(dims.body).toBeLessThanOrEqual(dims.h+1);
+ const kept=await reading.evaluate(e=>{e.scrollTop=Math.floor(e.scrollHeight/3);return e.scrollTop;});
  if(isMobile)await page.locator('#btn-detect').tap();else await page.click('#btn-detect');
- await expect(start.locator('#status-label')).toHaveText('待機中');await expect(text).not.toHaveText(before);
- expect(await reading.evaluate(e=>e.scrollTop)).toBe(0);
+ await expect(start.locator('#status-label')).toHaveText('待機中');await expect(start.locator('#record-count')).toHaveText('1');
+ await expect(text).toHaveText(before);expect(await reading.evaluate(e=>e.scrollTop)).toBe(kept);
  const chromeText=await page.locator('#screen-participant').evaluate(e=>{const copy=e.cloneNode(true);copy.querySelector('.reading').remove();return copy.textContent;});
  expect(chromeText).not.toMatch(/計測中|待機中|経過|記録/);
  await expect(page.locator('#status-label')).toBeHidden();await expect(page.locator('#record-body')).toBeHidden();

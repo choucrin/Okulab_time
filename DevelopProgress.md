@@ -859,3 +859,93 @@ E2EはiPhone 13縦横、iPad Pro 11縦横、Desktop Chromium、幅320px WebKit�
 開始送信の遅延で再試行後の確認画面非表示を再現し、E2Eの同期不備と切り分けました。両画面の計測開始完了を待つよう修正し、必須検証4件すべて成功。E2Eは60件成功です。成果物は/tmp/okulab-cycle2-final-browser-7Nqnag、詳細とReview引き継ぎはDevelopProgress.mdに記録しました。版数v.04.0を維持し、指定4文書は未変更です。
 - 未検証: 修正候補のReview3周と独立Testは管理側の後続工程です。
 - 未検証: iOS・iPadOS・Windows実機、実Firebase同期、Firestoreルール実評価は未実施です。
+
+## 実行 aa6a3c67-3b6f-4514-a43f-bbc292ed21e7 — Development（2026-10-17）
+
+- 対象コミット: ee824017f78d6de8399e074d205a91930aff98ec
+- 開始コミット: ff166d43bc8abc17fb1a104b79148f425d6f4f5a
+- 作業場所: 本実行の develop-cycle-0。候補コミットは管理側で確定する。
+- 現行バージョン: **v.04.1**。js/app.js・index.html・ProgressReport.md・RegacyReview.mdの現行版数を同期（過去のレビュー記録は保持）。
+
+### 実装内容と判断
+
+- F-14-1: onDetectはonEndだけを呼び、停止・失敗・再送で本文とスクロールを変えない。pointerdownの時刻取得、onEnd、送信・再送・失敗計数は変更していない。
+- 計測終了担当の実験者用UIに「文章を変更」と可否表示を追加。currentLoaded・activeId・busy・sendingを描画時とクリック時に確認する。文章の手動変更で計測・記録・順序反復状態は変更しない。
+- 本文の描画と表示後の寸法調整を分離。画面を離れる際にスクロールを退避し、往復では復元、変更後は先頭表示する。
+- 表示中の文章IDをokulab-time/reading-currentへlong/short・ルーム別に保存。未知ID・型違い・破損値は初回選択へフォールバック。保存不能でもメモリで保持し、破損JSON全体を上書きしない。既出キーと本文データは変更していない。
+- F-14-2: .reading__text pへtext-indent: 1emを追加。
+- F-14-3〜5: 合言葉を初期選択とする入室方法ラジオを追加。方式切替で入力・エラーを消去し、ラベル・説明を切替。parseRoomIdはtrim・半角16進40桁検証・小文字化のみで再ハッシュしない。deriveRoomIdは変更していない。
+- 全役割の実験者用画面で完全なIDを折りたたみ表示し、Clipboard APIの失敗時は全選択して手動コピーを案内。退出時は消去・折りたたみ、非同期コピーの完了もルーム世代を確認する。
+- F-14-6: READMEに入室方法、IDの共有注意、省略表示との違い、手動変更、字下げ、長文/旧短文の切替を記載。
+- firestore.rules、Firestore形式、CI・配信設定は変更していない。マージ時は既存workflowによるGitHub Pages自動配信がある。ルール変更はないためルール配信不要。この注意を管理側のPR本文へ記載すること。
+
+### 動作確認と後続依頼
+
+- node tools/verify.js: 終了0、9項目成功（v.04.1の一致を含む）。
+- node --test: 終了0、122件成功。
+- node tools/audit-passages.mjs: 終了0、長文10題の文字数と共有表現監査を実施。
+- git diff --check: 終了0。
+- ブラウザは既存e2e/support/harness.cjsのローカルサーバ・Firebaseスタブを使用。本番接続・本番書き込みなし。Ubuntu WebKit/Chromiumであり、iOS/iPadOS実機確認ではない。
+- 既存E2Eの更新はTest担当へ依頼する。e2e/okulab-time.spec.cjs:82のv.04.0固定値をv.04.1へ、同ファイルのdetails summaryをカタログに限定するセレクタへ変更する必要がある。e2e/reading.spec.cjsの停止後の本文変更・先頭表示期待を「本文と位置を保持」に変更し、旧期待の文章変更・先頭表示は手動変更操作へ移す（検証観点を削除しない）。
+- F-14-7の新規単体/E2E一式、通信失敗・処理中・クリック時再確認、旧短文の新仕様、375/390px、コピー成功等の網羅検証とTest.md記載はClaude CodeのTest工程へ引き継ぐ。開発確認は独立Testの代替ではない。
+- iPhone/iPad/Windows実機、実Firebase同期は未検証（今回PRの必須条件外）。
+- TASKS.md・RSD.md・Review.md・Test.mdは変更していない。Gitのcommit/checkout/reset/merge/push、別AI CLI起動、公開・配信・課金操作は行っていない。
+- 次の担当: 管理側で候補確定後、別セッションのReviewを3周、その後Claude CodeのTest。コミット・送達・次工程の起動は管理側担当で、開始済みとは扱わない。
+
+### ブラウザ実行結果（確定）
+
+- 必須コマンドの実行: `DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-aa6a3c67-development-browser devflow-browser`。既存60件の実行を開始したが、旧版数期待2件、停止時の文章変更期待1件、details summaryの複数一致1件、順序反復のタイムアウト1件を確認後、残りを中断した（終了130）。合格ではない。スクリーンショット・traceは同パスのtest-results配下。中断のためresults.json/htmlの完成は保証しない。タイムアウトは不具合と確定しておらず、独立Testで再確認すること。
+- 開発確認用の一時スクリプト: /tmp/okulab-f14-smoke/smoke.spec.cjs、設定: /tmp/okulab-f14-smoke/playwright.config.cjs。リポジトリのテストコードは変更していない。
+- 確定コマンド: `DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-aa6a3c67-development-smoke-confirmed devflow-browser --config /tmp/okulab-f14-smoke/playwright.config.cjs --project desktop-chromium --project iphone-portrait --workers 1`。終了0、4件成功（50.5秒）。
+- 対象: iPhone 13縦相当WebKit、Desktop Chromium。停止で本文・スクロール保持、画面往復の位置保持、手動変更後の本文差替え・先頭表示、再読み込み復元、段落字下げ、完全ID表示・コピー失敗案内、ID欄展開時の横幅、6桁IDの拒否、大文字・前後空白付き正式IDでの入室、合言葉で入った別ページとの開始/終了同期、計測中の変更無効を確認。
+- 成果物: /tmp/okulab-aa6a3c67-development-smoke-confirmed/results.json、html/index.html、test-results配下のスクリーンショット・trace。途中の開発スクリプト実行は中断・タイムアウト・待機条件不足による失敗を含むため、上記confirmedだけを成功結果として扱う。
+- parseRoomIdの一時Node確認: 正常化1件、不正入力7件（空、6/39/41桁、区切り、全角、内部空白）の拒否成功。
+- 必須checks全体は未合格（既存E2Eの更新と完走が必要）。Developmentの実装は完了。担当範囲内で確定した未修正のアプリ不具合なし。上記の新仕様テスト・既存セレクタ/期待値更新と全条件での再実行はTest担当へ依頼し、固定候補のReviewを先行する。
+
+<!-- devflow:aa6a3c67-3b6f-4514-a43f-bbc292ed21e7:develop:1:ee824017f78d6de8399e074d205a91930aff98ec -->
+
+
+## 2026-10-17T08:31:49.250270+00:00 / develop / 周回1
+実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+対象コミット: ee824017f78d6de8399e074d205a91930aff98ec
+
+Development担当としてF-14を実装し、版数をv.04.1へ更新しました。停止時の本文保持、手動変更、スクロール復元、文章保存、段落字下げ、ルームID入室・表示・コピーに対応しました。README.mdとDevelopProgress.mdを更新し、変更禁止文書・Firestoreルールは変更していません。コミット・公開・配信は未実施です。
+- 未検証: 整合性9項目・単体122件・本文監査・空白検査は成功。既存E2Eは旧版数・旧仕様の期待値、セレクタの複数一致、タイムアウトを確認して中断したため未合格です。更新箇所をDevelopProgress.mdへ記録しました。
+- 未検証: 別途の開発用ブラウザ確認はWebKitのiPhone縦相当とChromiumで4件成功。成果物は/tmp/okulab-aa6a3c67-development-smoke-confirmed配下です。独立Testの代替ではありません。
+- 未検証: 固定候補のReview3周、新仕様の網羅テスト、既存E2Eの完走は後続工程です。
+- 未検証: iOS/iPadOS・Windows実機、実Firebaseでの同期は未検証です。
+
+## 2026-10-17 Development: T-v041-001 修正
+
+- 実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+- 記録ID: aa6a3c67-develop-T-v041-001
+- 案件: Okulab_time / 工程: Development / 対象候補: 33147547748887a2d1c0ea9450e22feb8f53438f（開始コミット ff166d43bc8abc17fb1a104b79148f425d6f4f5a）
+- 対象ブランチ・修正差分は管理側で確定する。本記録とアプリ修正の書き込み担当はCodex。
+- T-v041-001（A-61・F-14-4）: js/store.js の parseRoomId が空入力・不正文字・桁数違いで投げる例外を、既存の userError に統一。describeError が userMessage を表示するため、入力に応じた案内がそのまま表示され、想定外エラーの再読み込み案内や console.error が出ない。検証順序・文言・正常入力の正規化・認証前の拒否は変更していない。
+- バージョンは同一依頼の初回実装で v.04.1 に更新済み。反復修正だけの増分を作らず、この版を維持して検証する。
+- TASKS.md・RSD.md・Review.md・Test.md、既存テスト・スタブ・配信設定は変更していない。コミット・別CLI起動・push・公開・配信・課金操作は行っていない。
+- 整合性9項目・単体133件・本文監査・空白検査は成功。ログ: /tmp/aa6-develop-verify.log、/tmp/aa6-develop-unit.log、/tmp/aa6-develop-audit.log。
+- ブラウザ実行: DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-develop-t-v041-001 devflow-browser。実行ログ: /tmp/aa6-develop-t-v041-001.log。結果は下記の確定記録を参照。
+- 開発確認はUbuntu WebKit/Chromiumの端末エミュレーション。Firebaseは既存スタブ、外部通信遮断。本番への書き込みなし。iOS/iPadOS・Windows実機、実Firebase同期とルール実評価は未検証（今回の必須実機条件外）。独立Testの代替とはしない。
+- 次の担当: 管理側でこの差分と引き継がれたテスト変更を含む候補を確定し、別セッションのReviewを3周後、Claude CodeのTestで既存テストを変更せず再実行。Test.mdへの独立Test結果記録はTest担当へ依頼する。コミット・送達・工程起動は管理側担当で、開始済みとは報告しない。配信確認はマージ後の承認付き別工程。
+
+### T-v041-001 動作確認の確定結果
+
+- ブラウザE2E: 終了0、108件すべて成功（29.2分）。results.jsonでも expected=108 / unexpected=0 / skipped=0 / flaky=0 を確認。
+- A-61: iphone-portrait / iphone-landscape / ipad-portrait / ipad-landscape / desktop-chromium / iphone-320 の6条件すべて passed。指摘時のテストを変更せずに成功した。
+- 成果物: /tmp/aa6-develop-t-v041-001/results.json、/tmp/aa6-develop-t-v041-001/html/index.html、/tmp/aa6-develop-t-v041-001/test-results/。ログ: /tmp/aa6-develop-t-v041-001.log。
+- 必須checks5件（node tools/verify.js、node --test、devflow-browser、git diff --check、node tools/audit-passages.mjs）はすべて成功。検証後の変更は本記録のみ。
+- 作業開始時HEADは上記対象コミットと一致し、detached HEAD。既存の未コミット差分はなかった。今回の変更は js/store.js と DevelopProgress.md のみ。管理側がコミットと引き継ぎを実行する。
+- Development完了。T-v041-001は修正済み。独立Review3周・Testの再実施は後続工程であり未実施。
+
+<!-- devflow:aa6a3c67-3b6f-4514-a43f-bbc292ed21e7:develop:1:33147547748887a2d1c0ea9450e22feb8f53438f -->
+
+
+## 2026-10-17T09:54:29.363472+00:00 / develop / 周回1
+実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+対象コミット: 33147547748887a2d1c0ea9450e22feb8f53438f
+
+Development完了。T-v041-001を修正し、ルームIDの入力エラーを適切な案内として表示するようにしました。同一依頼のv.04.1を維持し、DevelopProgress.mdを更新しました。必須チェック5件すべて成功。指定文書・テストは変更していません。
+- 未検証: 整合性9項目・単体133件・E2E108件が成功。A-61は6条件すべて成功。ブラウザ成果物: /tmp/aa6-develop-t-v041-001/。
+- 未検証: Ubuntu WebKit/ChromiumとFirebaseスタブによる確認です。iOS/iPadOS・Windows実機、実Firebase同期・ルール実評価は未検証です。本番への書き込みは行っていません。
+- 未検証: 修正候補の独立Review3周とTestは後続工程です。コミット・引き継ぎは管理側が実行します。公開・配信は未実施です。
