@@ -779,3 +779,163 @@ E2EのFirebaseはスタブです。本番には接続しておらず、外部へ
 - 未検証: iOS実機固有の挙動（ピンチで最小まで縮小したときの表示、アドレスバーの伸縮、PWA表示）。
 - 未検証: Firebase実環境でのルール評価と同期遅延。E2Eはインメモリのスタブで代替しました。
 - 未検証: 一括削除・1件削除のE2E（今回の変更範囲外）。
+
+## 2026-10-17 / test / 周回1(v.04.0・F-12 長文読み物・F-13 順序反復)
+
+- 実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+- 対象コミット: b6aea01cbd42e32e6d3c06b936365d7afe8a4e74(開始コミット aa3d61657be04b623a88631af7f2cf6018be1f61)
+- 環境: WSL2 Ubuntu(Linux 6.18)、Node.js v24.21.0、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。iPhone・iPad・Windows 実機なし。Firestore Emulator なし
+- 参照: RSD.md F-12・F-13・A-30〜A-46・7-4、Review.md(10b4405 / add61a4 / 9549552 で 3 周完了。R1-01 は改稿で解消、未解決 0 件)
+- テストコード・設定の変更: **なし**(Development が追加した単体・E2E をそのまま実行。Test.md への本記録の追記のみ)
+
+### 実行コマンドと結果(対象コミットの作業ツリーそのまま)
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功(v.04.0 一致、Firestore ルールと送信フィールド 作成27/更新2/meta4 を含む) |
+| `node --test` | 0 | 122件成功(22スイート)、失敗・スキップ・中断 0 |
+| `devflow-browser` | 0 | 60件すべて成功(6 条件 × 10 件。expected 60 / unexpected 0 / skipped 0 / flaky 0、10.3分)。Firebase はスタブ(本番接続なし)。成果物: /tmp/okulab-test-0649cd48(results.json、html/index.html、test-results)。ログ: /tmp/okulab-e2e-0649.log |
+| `git diff --check` | 0 | 成功 |
+
+### A-30: 長文の文字数と読了時間の目安(F-12-1 の数え方で Test が再計算)
+
+| id | 題名 | 段落 | 本文文字数 | 毎分400字の目安 |
+|---|---|---|---|---|
+| long-01 | 潮屋と共同食堂の台所帳 | 30 | 10,009 | 25.0分 |
+| long-02 | 水路へ戻る道 | 30 | 10,005 | 25.0分 |
+| long-03 | 白い窓が開く部屋 | 30 | 10,008 | 25.0分 |
+| long-04 | 島へ渡る籠、町へ戻る籠 | 30 | 10,006 | 25.0分 |
+| long-05 | 二つの台所へ綴じる紙 | 30 | 10,034 | 25.1分 |
+| long-06 | 食堂の椅子へ戻る羊毛 | 30 | 10,157 | 25.4分 |
+| long-07 | 名前を急がない川辺 | 30 | 10,191 | 25.5分 |
+| long-08 | 古書店の窓に残す余白 | 30 | 10,080 | 25.2分 |
+| long-09 | 祖母と電車の終点へ | 30 | 10,144 | 25.4分 |
+| long-10 | 二人の台所に合う畑 | 30 | 10,507 | 26.3分 |
+
+全題 10,000〜12,000 字の範囲内。機械検査(重複段落・20字以上の重複文・禁止語・空段落・識別子重複)は `test/reading.test.mjs` で成功。R1-01(共通構成の反復)の再発確認として、空白除去後の 12 文字連続一致が 4 題以上に共通する箇所を Test が臨時スクリプトで調べ、0 件だった(内容の精読ではない)。
+
+### 受け入れ条件との対応
+
+| 条件 | 根拠 |
+|---|---|
+| A-30 | 上表、`test/reading.test.mjs` |
+| A-31・A-32 | `e2e/reading.spec.cjs`(枠内末尾スクロール、通知・回転で本文と scrollTop 保持、スクロール後の終了、新文章は先頭)を 6 条件で成功 |
+| A-33 | `test/reading.test.mjs`(旧短文 57 件・SHA-256 基準値・設定値)、`e2e/reading.spec.cjs`(設定 1 か所で旧短文へ切替、既出キー保持) |
+| A-34 | 既存テストに 3 条件×5 セットの明示ケースは無い。Test が `js/sequence.js` の `validateSequence`・`sequencePosition`・`settleSequenceRun` を臨時スクリプトで実行し、白→赤→緑黄×5 の 15 有効試行で `status:'completed'`・`mode:'free'`、完了後の予定位置 `null`、途中の「記録しない」3 回を含め attempts 18 / done 15 を確認(ファイル変更なし) |
+| A-35・A-36・A-37 | `test/sequence.test.mjs`(白2・赤1×2 の順序・境界、記録しない・中止・消失で同位置、未判定・別ID・再通知で二重消費なし、最終位置の拒否で未完了)、`test/sequence-ui.test.mjs`(回答失敗・二重回答)、`e2e/sequence-development.spec.cjs` |
+| A-38 | `test/sequence-ui.test.mjs`(再読み込みで同じ予約を購読、古い別タブ更新の拒否)、`e2e/sequence-development.spec.cjs`(確認待ちの再読み込み、別タブの逆回答で二重消費なし) |
+| A-39・A-40 | `test/sequence-ui.test.mjs`(保存・上書き確認・空名・上限 50、未完了の置換確認、凍結)、`test/sequence.test.mjs`(入力形式・上限) |
+| A-41 | `test/sequence-ui.test.mjs`(旧セットは作成中へ読み込むだけ、旧バッチは明示終了) |
+| A-42 | `test/csv-sequence.test.mjs`(旧27列の名前・順序保持、末尾5列)、`test/sequence-ui.test.mjs`(記録チップと旧記録表示)、E2E A-25〜A-28 |
+| A-43 | E2E A-24(320px・375px・390px・iPad 縦横・デスクトップ)。375px は iphone-portrait 条件での `setViewportSize` 再計測 |
+| A-44 | `tools/verify.js`(ルールと送信フィールドの照合)、`test/store-random.test.mjs`(受領記録・一度限りの判定・不正値拒否)、`test/sequence.test.mjs`(旧22項目保持)。静的検査とスタブのみ |
+| A-45 | 必須チェック 4 件すべて成功。既存の A-24〜A-28 E2E・単体テストも同時に成功 |
+| A-46 | `test/sequence.test.mjs`(基準版との全文一致・旧22項目・省略/null 互換)、`tools/verify.js`。静的検査のみ |
+
+### 指摘事項
+
+- 重要項目: 0件。指摘項目: 0件。
+- 軽微項目 T-v040-001: A-34(白・赤・緑黄×5 セット=15 試行で完了し追加試行なし)を直接検査する回帰テストが無い。汎用の順序算出・確定処理のテストで間接的に担保され、Test の臨時確認でも成功した。次回の機能変更時に明示ケースの追加を推奨(今回は再レビューの反復を避けるため追加しない)。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows 実機での長文スクロール・順序反復操作。Ubuntu 上の WebKit / Chromium の結果は実機合格ではない。
+- Firestore ルールのエンジン実評価(Emulator・Rules Playground)と実 Firebase 同期。E2E はスタブで、ルールは静的検査のみ。
+- ルールの先行配信・Pages/Hosting への配信・after-merge の確認(自動工程の範囲外)。
+- 長文の内容は機械検査と抜き取りのみで、全文の精読はしていない。
+
+### 結論
+
+自動検証に基づき PR 提出可能。必須チェック 4 件をすべて実行・成功し、A-30〜A-43・A-46 を自動検証または静的検査で満たした。Review・Test の未解決の重要項目・指摘項目は 0 件。テストコード・設定の変更は無いため再レビューは不要。実機確認と Firestore ルールの実評価は未検証として PR 本文に明記すること。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:test:3:b6aea01cbd42e32e6d3c06b936365d7afe8a4e74 -->
+
+
+## 2026-10-17T01:57:57.217419+00:00 / test / 周回3
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: b6aea01cbd42e32e6d3c06b936365d7afe8a4e74
+
+b6aea01（v.04.0、F-12 長文読み物・F-13 順序反復）の独立Testを実施し、結果は合格です。必須チェック4件はすべて終了コード0で成功しました。
+- node tools/verify.js: 9項目すべて成功
+- node --test: 122件成功。失敗・スキップは0件
+- devflow-browser: 6条件×10件の計60件が成功。unexpected・flakyは0件。Firebaseはスタブです。成果物は/tmp/okulab-test-0649cd48にあります
+- git diff --check: 成功
+
+長文10題の文字数を独自に再計算しました。全題が10,005〜10,507字で、読了時間の目安は25.0〜26.3分です。Review指摘R1-01（各題が同じ段落構成を繰り返す問題）の再発確認として、題をまたいで共通する12文字の連続一致を臨時スクリプトで調べ、0件でした。A-34（白・赤・緑黄を5セット＝15回）も臨時スクリプトで確認しました。登録順に進み、15回で完了してそれ以上の試行が出ないことを確かめています。
+
+Review・Testの未解決の重要項目・指摘項目は0件です。変更したのはTest.mdへの記録の追記だけで、テストコードと設定は変更していないため、再レビューは不要です。
+- minor: T-v040-001: A-34（白・赤・緑黄×5セット＝15回で完了し、追加の試行が発生しない）を直接確かめる回帰テストがありません。汎用の順序算出・確定処理のテストで間接的にはカバーされており、Testの臨時スクリプトでも成功しました。次回の機能変更時に、このケースを明示したテストの追加を推奨します。
+- 未検証: iPhone（iOS Safari）・iPad（iPadOS Safari）・Windows実機での長文スクロールと順序反復の操作。Ubuntu上のWebKit/Chromiumの結果は実機合格を意味しません。
+- 未検証: Firestoreルールの実評価（EmulatorまたはRules Playground）と実Firebaseでの同期。ルールは静的検査のみで、E2Eはスタブを使用しました。
+- 未検証: ルールの先行配信、Pages/Hostingへの配信、after-mergeでの確認（自動工程の範囲外）。
+- 未検証: 長文の内容は機械検査と抜き取りの確認のみで、全文は精読していません。
+
+## 2026-10-17 / test / 周回2(v.04.0・E2E同期修正後の再テスト)
+
+- 実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+- 対象コミット: 7ad6483e00be0f2df8add42a07c2a1f5bbc883e9(開始コミット aa3d61657be04b623a88631af7f2cf6018be1f61)
+- 前回Test(b6aea01)からの差分: `e2e/sequence-development.spec.cjs`(`startAndWait` による開始完了待ち)、DevelopProgress.md・Review.md・Test.md のみ。アプリ本体・単体テスト・スタブ・設定は未変更
+- 環境: WSL2 Ubuntu(Linux 6.18)、Node.js v24、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。Firebase はE2Eスタブ(本番接続なし)。iPhone・iPad・Windows 実機なし、Firestore Emulator なし
+- 参照: RSD.md F-12・F-13・A-30〜A-46、Review.md(5ec5f01 / f14b641 / fe557ea で3周完了、各周指摘0件、未解決0件)
+- テストコード・設定の変更: **なし**(本記録の追記のみ)
+
+### 実行コマンドと結果
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功。ログ `/tmp/okulab-test2-verify.log` |
+| `node --test` | 0 | 122件成功(22スイート)、失敗・スキップ・中断0。ログ `/tmp/okulab-test2-unit.log` |
+| `devflow-browser` | 0 | 60件成功(6条件×10件、expected 60 / unexpected 0 / skipped 0 / flaky 0、9.6分)。成果物 `/home/choucrin/projects/.automation-runs/browser-artifacts/5709f344a1059fdf04b2`(results.json、html/index.html、test-results)、ログ `/tmp/okulab-test2-e2e.log` |
+| `git diff --check` | 0 | 成功 |
+
+### 追加の安定性確認(任意・必須外)
+
+修正対象の順序反復E2Eを、前回失敗した ipad-landscape 条件で反復した。
+
+| コマンド(`DEVFLOW_BROWSER_OUTPUT=<mktemp専用先>` 付き) | 結果・成果物 |
+|---|---|
+| `devflow-browser sequence-development.spec.cjs --project=ipad-landscape --repeat-each=5`(2ワーカー) | 終了1、9成功・1失敗。`/tmp/okulab-test2-seqrepeat-pL9kXO` |
+| 同上 `--workers=1` | 終了0、10件成功。`/tmp/okulab-test2-seqrepeat2-4Ukp56` |
+
+失敗は「確認待ちを再読み込みし、別タブの逆回答でも…」の discarded 分岐の再計測(62行目)。`startAndWait` は成功し、終了タブは 8.532 秒の記録で正常に終了していた。開始タブは終了後5秒の期限内に `#random-confirm` を表示しなかった。ただし失敗後のスクリーンショットでは確認画面が表示され、試行数(実際1回・有効0回)も正しい。trace のコンソールに購読取りこぼしの警告(reconcile)は無く、操作間隔が数秒単位に伸びていた。以上から、2ワーカー並列(各テスト3ページ・動画記録)の負荷による表示遅延が原因と判断した。データ不整合や二重消費は見られない。単一ワーカーでは再現しなかった。
+
+### 指摘事項
+
+- 重要項目: 0件。指摘項目: 0件。
+- 軽微項目 T-v040-002: 上記の負荷時タイミング依存。必須の全件E2Eは成功したが、反復実行では 1/10 の頻度で5秒の期限を超えた。管理側の再検証で偶発的に失敗する可能性がある。次回の変更時に、Development が開始タブの確認表示までの遅延要因を確認することを推奨する。期待値は緩めず、待機条件を見直すか、根拠を示して期限を調整する。今回は再レビューの反復を避けるためテストを変更しない。
+- 軽微項目 T-v040-001(前回から継続): A-34(15試行で完了)の明示的な回帰テストが無い。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows 実機。Ubuntu WebKit の端末エミュレーションは実機合格ではない。
+- Firestore ルールのエンジン実評価と実 Firebase の端末間同期(E2E はスタブ、ルールは静的検査のみ)。
+- 配信・after-merge 確認(自動工程の範囲外)。長文の内容は前回の機械検査と抜き取りのみ(本文は未変更)。
+
+### 結論
+
+自動検証の結果、PR を提出できる状態。必須チェック4件はすべて実行し、成功した。Review・Test の未解決の重要項目・指摘項目は0件。テストコード・設定は変更していないため、再レビューは不要。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:test:3:7ad6483e00be0f2df8add42a07c2a1f5bbc883e9 -->
+
+
+## 2026-10-17T03:29:55.960414+00:00 / test / 周回3
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 7ad6483e00be0f2df8add42a07c2a1f5bbc883e9
+
+候補7ad6483（v.04.0）の独立Testを実施し、合格です。必須チェック4件はすべて終了コード0で成功しました。
+- node tools/verify.js: 9項目すべて成功
+- node --test: 122件成功。失敗・スキップは0件
+- devflow-browser: 6条件×10件の計60件が成功。unexpected・flakyは0件。成果物は/home/choucrin/projects/.automation-runs/browser-artifacts/5709f344a1059fdf04b2にあります
+- git diff --check: 成功
+
+前回Test以降の変更はE2Eの同期修正（startAndWait）と記録文書だけで、アプリ本体は変更されていません。
+
+前回失敗したiPad横向きで、順序反復E2Eを追加で反復しました。2ワーカーでは10回中1回、開始タブの確認画面が5秒の期限内に表示されず失敗しました。データの不整合はなく、確認画面は失敗後に表示されています。1ワーカーでは10回すべて成功したため、負荷による表示の遅れと判断し、軽微項目として記録しました。
+
+Review・Testの未解決の重要項目・指摘項目は0件です。変更したのはTest.mdへの記録の追記だけで、テストコードと設定は変更していないため、再レビューは不要です。
+- minor: T-v040-002: 順序反復E2E「確認待ちを再読み込みし、別タブの逆回答でも予定試行を二重消費しない」の、記録しない後の再計測（e2e/sequence-development.spec.cjs:62）が負荷に依存して失敗することがあります。iPad横向き・2ワーカーで10回中1回、開始タブの#random-confirmが5秒以内に表示されませんでした。終了操作は正常に記録されており、確認画面は後から表示されています。試行数も正しく、購読の取りこぼし警告もありませんでした。1ワーカーでは10回すべて成功しています。成果物は/tmp/okulab-test2-seqrepeat-pL9kXOです。必須の全件E2Eは成功しましたが、管理側の再検証で偶発的に失敗する可能性があります。次回の変更時に、期待値を緩めずに遅延の要因を確認するか、根拠を示して期限を調整することを推奨します。
+- minor: T-v040-001（前回から継続）: A-34（白・赤・緑黄×5セット＝15回で完了し、追加の試行が発生しない）を直接確かめる回帰テストがありません。汎用の順序算出・確定処理のテストで間接的にはカバーされています。
+- 未検証: iPhone（iOS Safari）・iPad（iPadOS Safari）・Windows実機は未検証です。Ubuntu上のWebKit/Chromiumによる端末エミュレーションの結果は、実機合格を意味しません。
+- 未検証: Firestoreルールの実評価（EmulatorまたはRules Playground）と、実Firebaseでの端末間同期は未検証です。E2Eはスタブを使用し、ルールは静的検査のみです。
+- 未検証: Hosting/Firestoreルールの配信とafter-mergeでの確認は、自動工程の範囲外のため実施していません。
+- 未検証: 長文の内容は前回の機械検査と抜き取りの確認のみで、全文は精読していません（本文は前回から変更なし）。

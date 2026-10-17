@@ -722,3 +722,7 @@ button:focus-visible {
   white-space: nowrap;
   overflow-wrap: normal;
 }
+
+/* 本文の段落だけに余白を付け、読み物の枠と文字サイズは維持する。 */
+.reading__text p { margin: 0 0 1.2em; }
+.reading__text p:last-child { margin-bottom: 0; }

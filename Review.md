@@ -486,3 +486,112 @@ a9cb1c2eのReview第3周（保守性・回帰・互換性）を完了しまし�
 - 未検証: 修正候補に対する独立したTest工程の再実施は後続工程です。
 - 未検証: iOS・iPadOS・Windows実機確認は後日ユーザ実施です。Ubuntu上のエミュレーションは実機合格を意味しません。
 - 未検証: iOS固有のズーム・アドレスバー・PWA挙動、Firebase実環境のルール評価・同期遅延、削除操作のE2Eは未検証です。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:1:d157a87ca28b6f87b9bc0e1fb954915421ccec8d -->
+
+
+## 2026-10-16T15:32:28.355803+00:00 / review / 周回1
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: d157a87ca28b6f87b9bc0e1fb954915421ccec8d
+
+固定候補d157a87のReview第1周（要件と正しさ）を完了しました。自動検証はすべて成功しましたが、本文品質に指摘1件があり、合格ではありません。候補ファイルは変更していません。
+- issue: R1-01: js/passages-long.js:7以降。10題の本文が共通の段落構成を繰り返し、対象物・場所などを差し替えた内容になっています。例えば「私が思い描いていたよりも身近な大きさで」「一つの場所にも幾通りもの入り口がある」は各題に3回ずつ、「についていえば」は各題の全30段落に出現します。冒頭・中間・末尾を比較しても各題の展開が共通であり、TASKS.mdとRSD F-12-2の「題材・展開が互いに異なる独立した長文」を満たしていません。完全一致の段落・文だけを検査する現行テストでは検出できません。各題固有の出来事と流れを持つ本文へ改稿し、文字数確認と内容レビューを再実施してください。
+- 未検証: Review第2・第3周とClaude Codeによる独立Testは本工程の対象外です。
+- 未検証: Firestoreルールの実評価、実Firebase同期、iOS・iPadOS・Windows実機確認は未実施です。ブラウザ検証はUbuntu上のWebKit/ChromiumとFirebaseスタブを使用しました。
+- 未検証: 公開・配信は未実施です。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:2:84be6703c3dd50d7c94dd97cc184e5bdcb8d1a7c -->
+
+
+## 2026-10-16T15:42:46.868018+00:00 / review / 周回2
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 84be6703c3dd50d7c94dd97cc184e5bdcb8d1a7c
+
+固定候補84be670のReview第2周（セキュリティ・データ整合性）を完了しました。本周の指摘は0件、必須checksはすべて成功しました。候補ファイルは変更していません。全工程の合格判定は別途必要です。
+- 未検証: Firestoreルールは静的確認のみで、Emulator・実Firebaseでの実評価と実端末間同期は未実施です。
+- 未検証: ブラウザ検証はUbuntu上のWebKit/ChromiumとFirebaseスタブを使用しました。iOS・iPadOS・Windows実機は未検証です。
+- 未検証: Review第3周とClaude Codeによる独立Testは本工程の対象外です。公開・配信は実施していません。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:3:7109164560483493defe84c46385b0159485d2d1 -->
+
+
+## 2026-10-16T15:52:19.357086+00:00 / review / 周回3
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 7109164560483493defe84c46385b0159485d2d1
+
+候補7109164のReview第3周（保守性・回帰・互換性）を完了しました。追加指摘は0件、必須checksはすべて成功しましたが、第1周のR1-01が未解決のため合格ではありません。候補ファイルは変更していません。
+- issue: R1-01（継続・未解決）: js/passages-long.js:7以降。10題が共通の段落構成を反復しています。「私が思い描いていたよりも身近な大きさで」「一つの場所にも幾通りもの入り口がある」は各題3回、「についていえば」は各題30段落すべてに出現します。第1周以降の変更はReview.mdのみで、本文は未修正です。TASKS.mdとRSD F-12-2の独立した題材・展開を満たすよう改稿し、内容レビューを再実施してください。
+- 未検証: Claude Codeによる本候補の独立Testは未実施です。
+- 未検証: Firestoreルールの確認は静的検査のみです。Emulator・実Firebaseでのルール評価と実端末間同期は未検証です。
+- 未検証: ブラウザ検証はUbuntu上のWebKit/ChromiumとFirebaseスタブを使用しました。iOS・iPadOS・Windows実機は未検証です。
+- 未検証: 公開・配信は実施していません。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:1:10b4405a4c8efd7a4fb189a06390dfd1b535f833 -->
+
+
+## 2026-10-17T01:17:03.371362+00:00 / review / 周回1
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 10b4405a4c8efd7a4fb189a06390dfd1b535f833
+
+候補10b4405のReview第1周（要件・正しさ）を完了。指摘0件。長文10題の抜き取り、旧短文保持、順序反復・再試行・旧データ互換性を確認。整合性9項目、単体122件、E2E60件が成功。候補ファイルは未変更。E2E成果物: /home/choucrin/projects/.automation-runs/browser-artifacts/2edaa91447c8aeb7dacb/results.json
+- 未検証: Review第2・3周とClaude Codeによる独立Testは未実施。
+- 未検証: iOS・iPadOS・Windows実機、実Firebase同期、Firestoreルール実評価は未実施。Ubuntu WebKitの結果は実機合格を意味しません。
+- 未検証: 長文の内容確認は抜き取りであり、全文の精読ではありません。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:2:add61a4d9b858898d777a5d5bff11d41acf638cd -->
+
+
+## 2026-10-17T01:27:04.204549+00:00 / review / 周回2
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: add61a4d9b858898d777a5d5bff11d41acf638cd
+
+固定候補add61a4のReview第2周（セキュリティ・データ整合性）を完了。指摘0件。操作者制限、判定の一度限りの更新、再送・削除時の整合性、複数タブ競合、CSV対策を確認。整合性9項目・単体122件・E2E60件・空白検査が成功。候補ファイルは未変更。E2E成果物: /home/choucrin/projects/.automation-runs/browser-artifacts/fa1644d3d413cd556ea0/results.json
+- 未検証: Firestoreルールは静的確認のみ。ルールエンジンでの実評価・実Firebase同期は未実施。E2EはFirebaseスタブを使用。
+- 未検証: iOS・iPadOS・Windows実機は未検証。Ubuntu WebKitの結果は実機合格を意味しません。
+- 未検証: Review第3周とClaude Codeによる独立Testは本工程の対象外であり、全工程の合格判定は未実施。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:3:9549552cfb8bc9659a8d7bf4e67ecbfcf5fc0770 -->
+
+
+## 2026-10-17T01:37:37.999498+00:00 / review / 周回3
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 9549552cfb8bc9659a8d7bf4e67ecbfcf5fc0770
+
+候補9549552のReview第3周（保守性・回帰・互換性）を完了。指摘0件。旧データ・CSV互換、読み物の切り戻し、テスト置換範囲、複数タブ処理を確認。整合性9項目、単体122件、E2E60件、空白検査が成功。候補ファイルは未変更。E2E成果物: /home/choucrin/projects/.automation-runs/browser-artifacts/5068d4ea270daee2a930/results.json
+- 未検証: Firestoreルールのエンジン実評価・実Firebase同期は未実施。E2EはFirebaseスタブを使用。
+- 未検証: iOS・iPadOS・Windows実機は未検証。Ubuntu WebKitの結果は実機合格を意味しません。
+- 未検証: Claude Codeによる独立Testと全工程の合格判定は本レビューの対象外です。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:1:5ec5f0152afb8729bfff00fc5c864a7be4c8957a -->
+
+
+## 2026-10-17T02:48:00.299305+00:00 / review / 周回1
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 5ec5f0152afb8729bfff00fc5c864a7be4c8957a
+
+候補5ec5f015のReview第1周（要件・正しさ）を完了。指摘0件。長文10題の抜き取り、順序反復・再試行・旧データ互換性、E2E同期修正を確認しました。整合性9項目、単体122件、E2E60件、空白検査が成功。候補ファイルは未変更です。E2E成果物: /tmp/okulab-review1-cycle2-browser/results.json
+- 未検証: 本候補のReview第2・第3周とClaude Codeによる独立Test、全工程の合格判定は未実施です。
+- 未検証: iOS・iPadOS・Windows実機、実Firebase同期、Firestoreルール実評価は未検証です。E2EはUbuntu上のWebKit/ChromiumとFirebaseスタブによる検証です。
+- 未検証: 長文の内容確認は抜き取りであり、全文の精読ではありません。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:2:f14b6417e82d4e69829803261157bcc66b6bd70e -->
+
+
+## 2026-10-17T02:58:40.540152+00:00 / review / 周回2
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: f14b6417e82d4e69829803261157bcc66b6bd70e
+
+固定候補f14b6417のReview第2周（セキュリティ・データ整合性）を完了。指摘0件。アクセス制御、判定の一回性、保存・再送・複数タブの排他制御、旧データ互換性を確認しました。整合性9項目、単体122件、E2E60件、空白検査はすべて成功。候補ファイルは未変更です。E2E成果物: /tmp/okulab-review2-cycle2-browser/results.json
+- 未検証: Firestoreルールの実評価、実Firebase同期、iOS・iPadOS・Windows実機は未検証です。E2EはUbuntu上のWebKit/ChromiumとFirebaseスタブによる検証です。
+- 未検証: Review第3周とClaude Codeによる独立Test、全工程の合格判定は本レビューの対象外です。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:review:3:fe557eaa7be82556199dc2a2146326b4d7c7e077 -->
+
+
+## 2026-10-17T03:08:59.849358+00:00 / review / 周回3
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: fe557eaa7be82556199dc2a2146326b4d7c7e077
+
+固定候補fe557eaaのReview第3周（保守性・回帰・互換性）を完了。指摘0件。旧データ・CSV互換性、旧短文保持、テスト置換の対応を確認しました。整合性9項目、単体122件、E2E60件、空白検査はすべて成功。候補ファイルは未変更です。E2E成果物: /tmp/okulab-review3-cycle2-browser/results.json
+- 未検証: Firestoreルールの実評価、実Firebase同期、iOS・iPadOS・Windows実機は未検証です。E2EはUbuntu上のWebKit/ChromiumとFirebaseスタブによる検証です。
+- 未検証: Claude Codeによる独立Testと全工程の合格判定は本レビューに含みません。

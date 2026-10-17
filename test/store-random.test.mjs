@@ -75,7 +75,8 @@ function createStoreFunctions() {
       const sessionRef  = ${sessionRef};
       ${startSessionBody}
       ${decideRandomSessionBody}
-      return { startSession, decideRandomSession };
+      ${extractFunction(src, "decideSequenceSession")}
+      return { startSession, decideRandomSession, decideSequenceSession };
     })()
   `;
 
@@ -231,5 +232,33 @@ describe("F-9-10 / N-2-5: decideRandomSession(randomOutcomeの一度限りの更
   test("存在しない記録には判定できない", async () => {
     const { decideRandomSession, db } = createStoreFunctions();
     await assert.rejects(() => decideRandomSession(db, "room-1", "missing", "confirmed"));
+  });
+});
+
+
+describe("F-13: 順序反復の作成・受領・専用判定", () => {
+  const press = () => randomPress({mode:"sequence",randomBatchId:null,sequenceRunId:"run-1",sequenceTrial:2,sequenceSet:1,sequencePosition:2});
+  test("新方式の5項目と受領記録を作り、旧random項目を流用しない",async()=>{
+    const {startSession,store,db}=createStoreFunctions();await startSession(db,"r",press(),"s");
+    const d=store.get("rooms/r/sessions/s");assert.equal(d.mode,"sequence");assert.equal(d.randomBatchId,null);assert.equal(d.randomOutcome,null);
+    assert.equal(d.sequenceRunId,"run-1");assert.equal(d.sequenceTrial,2);assert.equal(d.sequenceSet,1);assert.equal(d.sequencePosition,2);assert.equal(d.sequenceOutcome,null);
+    assert.equal(store.get("rooms/r/startReceipts/s").startedBy,"uid-opener");
+    store.delete("rooms/r/sessions/s");store.set("rooms/r/meta/current",{activeSessionId:null});
+    const again=await startSession(db,"r",press(),"s");assert.equal(again.code,"SESSION_MISSING");assert.equal(store.has("rooms/r/sessions/s"),false);
+  });
+  test("専用判定は同じ値で冪等、逆の回答・不正値・計測中・旧記録を拒否",async()=>{
+    const {startSession,decideSequenceSession,store,db}=createStoreFunctions();await startSession(db,"r",press(),"s");
+    await assert.rejects(decideSequenceSession(db,"r","s","confirmed"));
+    const path="rooms/r/sessions/s";store.set(path,{...store.get(path),status:"done"});
+    await decideSequenceSession(db,"r","s","confirmed");await decideSequenceSession(db,"r","s","confirmed");
+    assert.equal(store.get(path).sequenceOutcome,"confirmed");assert.equal(store.get(path).randomOutcome,null);
+    await assert.rejects(decideSequenceSession(db,"r","s","discarded"),/既に判定/);
+    await assert.rejects(decideSequenceSession(db,"r","s","other"));
+    store.set(path,{...store.get(path),mode:"random"});await assert.rejects(decideSequenceSession(db,"r","s","confirmed"));
+  });
+  test("任意方式は新5項目をnullで作成し、開始時刻とタグを保持",async()=>{
+    const {startSession,store,db}=createStoreFunctions();await startSession(db,"r",randomPress({mode:"free",randomBatchId:null}),"s");
+    const d=store.get("rooms/r/sessions/s");for(const f of ["sequenceRunId","sequenceTrial","sequenceSet","sequencePosition","sequenceOutcome"])assert.equal(d[f],null);
+    assert.equal(d.startMs,1000);assert.deepEqual(plain(d.tags),["色:赤"]);
   });
 });
