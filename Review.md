@@ -619,3 +619,16 @@ a9cb1c2eのReview第3周（保守性・回帰・互換性）を完了しまし�
 - 未検証: 整合性9項目・単体122件・本文監査・空白検査は成功しました。
 - 未検証: ブラウザ実行: DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-review2-browser devflow-browser --project=desktop-chromium --workers=1 --timeout=30000 --max-failures=1。既存e2e/okulab-time.spec.cjs:82が旧版v.04.0を期待し、候補のv.04.1との不一致で失敗しました。1件失敗・9件未実行。成果物は/tmp/aa6-review2-browser/results.json、html/index.html、test-results配下です。Test担当による期待値更新と全条件の完走が必要です。
 - 未検証: 本番Firebaseへの書き込みは行っていません。実Firebaseでのルール評価、iOS・iPadOS・Windows実機は未検証です。第3周レビューと独立Testは後続工程です。
+
+<!-- devflow:aa6a3c67-3b6f-4514-a43f-bbc292ed21e7:review:3:11597048d5f228ba555b9cb1654a5b71c6d9529b -->
+
+
+## 2026-10-17T08:34:50.910336+00:00 / review / 周回3
+実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+対象コミット: 11597048d5f228ba555b9cb1654a5b71c6d9529b
+
+固定候補11597048d5f228ba555b9cb1654a5b71c6d9529bの第3周レビュー（保守性・回帰・互換性）を完了しました。アプリ実装の指摘は0件です。保存形式、既存の入室・計測処理、読み物の表示と既出管理への影響を確認しました。候補ファイルは変更していません。必須検証の全合格には至っていません。
+- 未検証: 整合性9項目、単体122件、本文監査、空白検査は成功しました。
+- 未検証: ブラウザ実行: DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-review3-browser devflow-browser --workers=2 --timeout=30000 --max-failures=1。旧版数v.04.0を期待するe2e/okulab-time.spec.cjs:82で失敗しました。1件失敗、1件中断、58件未実行。成果物: /tmp/aa6-review3-browser/results.json、html/index.html、test-results/。
+- 未検証: e2e/reading.spec.cjs:22には旧仕様の「停止で文章変更」の期待値が残っています。Test担当による新仕様への更新と全条件の検証が必要です。
+- 未検証: 本番Firebaseへの書き込みは行っていません。実Firebase、iOS・iPadOS・Windows実機は未検証です。Ubuntu WebKitは実機検証ではありません。
