@@ -1028,3 +1028,48 @@ v.04.1（eacb753）の Test 工程は完了し、判定は不合格です。必�
 - 未検証: 実 Firebase での端末間同期と、Firestore ルールの実評価は未検証です。firestore.rules は変更されていません。本番 Firebase への書き込みは行っていません。
 - 未検証: 配信と after-merge の確認は、この自動工程の範囲外のため実施していません。
 - 未検証: Test でテストコードとスタブを変更したため、修正後の候補は Review を3周してから再テストする必要があります。
+
+## 2026-10-17 / test / 周回2(v.04.1・T-v041-001 修正の再テスト)
+
+- 実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+- 対象コミット: 8a50b278944a59b889424ebccca348942ebdba7c(開始コミット ff166d43bc8abc17fb1a104b79148f425d6f4f5a)。前回 Test(3314754)からのアプリ差分は `js/store.js` の `parseRoomId` が `userError`(`userMessage` 付き)を投げる変更だけ。Review 3周(171299f / 5248b02 / 4874d29)完了・各周の指摘0件
+- 環境: WSL2 Ubuntu(Linux 6.18)、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)、Firebase は E2E スタブ(本番接続・書き込みなし)。実機・Firestore Emulator なし
+- テストコード: 前回記録のテストを変更せずに再実行した(3314754 以降、`e2e/`・`test/` の差分なし)。今回の変更は本 Test.md のみ
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功。ログ `/tmp/aa6-t2-verify.log` |
+| `node --test` | 0 | 133件成功、失敗・スキップ・中断0。ログ `/tmp/aa6-t2-unit.log` |
+| `devflow-browser`(`DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-test2-8a50b27`) | 0 | 108件すべて成功(6条件×18件、16.9分)。前回失敗の A-61 も6条件で無修正のまま成功。成果物 `/tmp/aa6-test2-8a50b27/results.json`、`html/index.html`。ログ `/tmp/aa6-test2-browser.log` |
+| `git diff --check` | 0 | 成功 |
+| `node tools/audit-passages.mjs` | 0 | 成功、`repeatedGroupCount: 0`。ログ `/tmp/aa6-t2-audit.log` |
+
+### 指摘事項
+
+- 重要項目: 0件。
+- 指摘項目: 0件。T-v041-001 は解消(A-61 で `#join-error` に入力エラー文言がそのまま表示され、想定外エラー扱いにならないことを E2E で確認)。
+- 軽微項目: T-v040-001・T-v040-002 は前回から継続(今回の実行では順序反復E2Eは成功)。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows 実機。Ubuntu WebKit の端末エミュレーションは実機合格ではない。iOS のクリップボード・長押し選択・ソフトウェアキーボード表示時の参加画面は未確認。
+- 実 Firebase での端末間同期と Firestore ルールの実評価(`firestore.rules` は未変更)。
+- 配信・after-merge の確認(自動工程の範囲外)。
+
+### 結論
+
+**合格**。必須チェック5件をすべて実行・成功し、A-47〜A-66 を満たした。Review・Test の未解決の重要項目・指摘項目は0件。テストコードは変更していない。
+
+<!-- devflow:aa6a3c67-3b6f-4514-a43f-bbc292ed21e7:test:3:8a50b278944a59b889424ebccca348942ebdba7c -->
+
+
+## 2026-10-17T11:04:29.780942+00:00 / test / 周回3
+実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+対象コミット: 8a50b278944a59b889424ebccca348942ebdba7c
+
+v.04.1の対象コミット8a50b278を再テストし、合格としました。必須チェック5件はすべて実行して成功しています（整合性9項目、単体テスト133件、E2E 108件（6条件×18件）、空白エラー検査、本文監査）。前回の指摘T-v041-001は解消しました。ルームIDの入力エラーは、想定外エラーとしてではなく入力エラーの文言のまま表示されます。前回失敗したA-61は、テストを変更しないまま6条件すべてで成功しました。Review・Testで未解決の重要項目・指摘項目は0件です。今回変更したのはTest.mdの追記だけで、テストコードは変更していません。
+- minor: 前回から残っている軽微項目T-v040-001とT-v040-002は未解決のままです。運用への支障はなく、今回の実行では順序反復のE2Eも成功しました。
+- 未検証: ブラウザ検証の成果物: /tmp/aa6-test2-8a50b27/results.json と html/index.html、ログは /tmp/aa6-test2-browser.log です。Ubuntu上のWebKit/ChromiumとFirebaseスタブで検証しており、iOS/iPadOS実機での合格ではありません。
+- 未検証: iPhone・iPad・Windowsの実機は未検証です。iOSのクリップボード、長押しでの選択、ソフトウェアキーボード表示時の参加画面も確認していません。
+- 未検証: 実Firebaseでの端末間同期と、Firestoreルールの実評価は未検証です。firestore.rulesは変更されていません。本番への書き込みは行っていません。
+- 未検証: 配信とafter-mergeの確認は、この自動工程の範囲外のため実施していません。
