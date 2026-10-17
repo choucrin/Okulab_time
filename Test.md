@@ -869,3 +869,73 @@ Review・Testの未解決の重要項目・指摘項目は0件です。変更し
 - 未検証: Firestoreルールの実評価（EmulatorまたはRules Playground）と実Firebaseでの同期。ルールは静的検査のみで、E2Eはスタブを使用しました。
 - 未検証: ルールの先行配信、Pages/Hostingへの配信、after-mergeでの確認（自動工程の範囲外）。
 - 未検証: 長文の内容は機械検査と抜き取りの確認のみで、全文は精読していません。
+
+## 2026-10-17 / test / 周回2(v.04.0・E2E同期修正後の再テスト)
+
+- 実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+- 対象コミット: 7ad6483e00be0f2df8add42a07c2a1f5bbc883e9(開始コミット aa3d61657be04b623a88631af7f2cf6018be1f61)
+- 前回Test(b6aea01)からの差分: `e2e/sequence-development.spec.cjs`(`startAndWait` による開始完了待ち)、DevelopProgress.md・Review.md・Test.md のみ。アプリ本体・単体テスト・スタブ・設定は未変更
+- 環境: WSL2 Ubuntu(Linux 6.18)、Node.js v24、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。Firebase はE2Eスタブ(本番接続なし)。iPhone・iPad・Windows 実機なし、Firestore Emulator なし
+- 参照: RSD.md F-12・F-13・A-30〜A-46、Review.md(5ec5f01 / f14b641 / fe557ea で3周完了、各周指摘0件、未解決0件)
+- テストコード・設定の変更: **なし**(本記録の追記のみ)
+
+### 実行コマンドと結果
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功。ログ `/tmp/okulab-test2-verify.log` |
+| `node --test` | 0 | 122件成功(22スイート)、失敗・スキップ・中断0。ログ `/tmp/okulab-test2-unit.log` |
+| `devflow-browser` | 0 | 60件成功(6条件×10件、expected 60 / unexpected 0 / skipped 0 / flaky 0、9.6分)。成果物 `/home/choucrin/projects/.automation-runs/browser-artifacts/5709f344a1059fdf04b2`(results.json、html/index.html、test-results)、ログ `/tmp/okulab-test2-e2e.log` |
+| `git diff --check` | 0 | 成功 |
+
+### 追加の安定性確認(任意・必須外)
+
+修正対象の順序反復E2Eを、前回失敗した ipad-landscape 条件で反復した。
+
+| コマンド(`DEVFLOW_BROWSER_OUTPUT=<mktemp専用先>` 付き) | 結果・成果物 |
+|---|---|
+| `devflow-browser sequence-development.spec.cjs --project=ipad-landscape --repeat-each=5`(2ワーカー) | 終了1、9成功・1失敗。`/tmp/okulab-test2-seqrepeat-pL9kXO` |
+| 同上 `--workers=1` | 終了0、10件成功。`/tmp/okulab-test2-seqrepeat2-4Ukp56` |
+
+失敗は「確認待ちを再読み込みし、別タブの逆回答でも…」の discarded 分岐の再計測(62行目)。`startAndWait` は成功し、終了タブは 8.532 秒の記録で正常に終了していた。開始タブは終了後5秒の期限内に `#random-confirm` を表示しなかった。ただし失敗後のスクリーンショットでは確認画面が表示され、試行数(実際1回・有効0回)も正しい。trace のコンソールに購読取りこぼしの警告(reconcile)は無く、操作間隔が数秒単位に伸びていた。以上から、2ワーカー並列(各テスト3ページ・動画記録)の負荷による表示遅延が原因と判断した。データ不整合や二重消費は見られない。単一ワーカーでは再現しなかった。
+
+### 指摘事項
+
+- 重要項目: 0件。指摘項目: 0件。
+- 軽微項目 T-v040-002: 上記の負荷時タイミング依存。必須の全件E2Eは成功したが、反復実行では 1/10 の頻度で5秒の期限を超えた。管理側の再検証で偶発的に失敗する可能性がある。次回の変更時に、Development が開始タブの確認表示までの遅延要因を確認することを推奨する。期待値は緩めず、待機条件を見直すか、根拠を示して期限を調整する。今回は再レビューの反復を避けるためテストを変更しない。
+- 軽微項目 T-v040-001(前回から継続): A-34(15試行で完了)の明示的な回帰テストが無い。
+
+### 未実施・未検証
+
+- iPhone(iOS Safari)・iPad(iPadOS Safari)・Windows 実機。Ubuntu WebKit の端末エミュレーションは実機合格ではない。
+- Firestore ルールのエンジン実評価と実 Firebase の端末間同期(E2E はスタブ、ルールは静的検査のみ)。
+- 配信・after-merge 確認(自動工程の範囲外)。長文の内容は前回の機械検査と抜き取りのみ(本文は未変更)。
+
+### 結論
+
+自動検証の結果、PR を提出できる状態。必須チェック4件はすべて実行し、成功した。Review・Test の未解決の重要項目・指摘項目は0件。テストコード・設定は変更していないため、再レビューは不要。
+
+<!-- devflow:0649cd48-1434-4578-bc30-2367715b1b18:test:3:7ad6483e00be0f2df8add42a07c2a1f5bbc883e9 -->
+
+
+## 2026-10-17T03:29:55.960414+00:00 / test / 周回3
+実行ID: 0649cd48-1434-4578-bc30-2367715b1b18
+対象コミット: 7ad6483e00be0f2df8add42a07c2a1f5bbc883e9
+
+候補7ad6483（v.04.0）の独立Testを実施し、合格です。必須チェック4件はすべて終了コード0で成功しました。
+- node tools/verify.js: 9項目すべて成功
+- node --test: 122件成功。失敗・スキップは0件
+- devflow-browser: 6条件×10件の計60件が成功。unexpected・flakyは0件。成果物は/home/choucrin/projects/.automation-runs/browser-artifacts/5709f344a1059fdf04b2にあります
+- git diff --check: 成功
+
+前回Test以降の変更はE2Eの同期修正（startAndWait）と記録文書だけで、アプリ本体は変更されていません。
+
+前回失敗したiPad横向きで、順序反復E2Eを追加で反復しました。2ワーカーでは10回中1回、開始タブの確認画面が5秒の期限内に表示されず失敗しました。データの不整合はなく、確認画面は失敗後に表示されています。1ワーカーでは10回すべて成功したため、負荷による表示の遅れと判断し、軽微項目として記録しました。
+
+Review・Testの未解決の重要項目・指摘項目は0件です。変更したのはTest.mdへの記録の追記だけで、テストコードと設定は変更していないため、再レビューは不要です。
+- minor: T-v040-002: 順序反復E2E「確認待ちを再読み込みし、別タブの逆回答でも予定試行を二重消費しない」の、記録しない後の再計測（e2e/sequence-development.spec.cjs:62）が負荷に依存して失敗することがあります。iPad横向き・2ワーカーで10回中1回、開始タブの#random-confirmが5秒以内に表示されませんでした。終了操作は正常に記録されており、確認画面は後から表示されています。試行数も正しく、購読の取りこぼし警告もありませんでした。1ワーカーでは10回すべて成功しています。成果物は/tmp/okulab-test2-seqrepeat-pL9kXOです。必須の全件E2Eは成功しましたが、管理側の再検証で偶発的に失敗する可能性があります。次回の変更時に、期待値を緩めずに遅延の要因を確認するか、根拠を示して期限を調整することを推奨します。
+- minor: T-v040-001（前回から継続）: A-34（白・赤・緑黄×5セット＝15回で完了し、追加の試行が発生しない）を直接確かめる回帰テストがありません。汎用の順序算出・確定処理のテストで間接的にはカバーされています。
+- 未検証: iPhone（iOS Safari）・iPad（iPadOS Safari）・Windows実機は未検証です。Ubuntu上のWebKit/Chromiumによる端末エミュレーションの結果は、実機合格を意味しません。
+- 未検証: Firestoreルールの実評価（EmulatorまたはRules Playground）と、実Firebaseでの端末間同期は未検証です。E2Eはスタブを使用し、ルールは静的検査のみです。
+- 未検証: Hosting/Firestoreルールの配信とafter-mergeでの確認は、自動工程の範囲外のため実施していません。
+- 未検証: 長文の内容は前回の機械検査と抜き取りの確認のみで、全文は精読していません（本文は前回から変更なし）。
