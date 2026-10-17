@@ -914,3 +914,38 @@ Development担当としてF-14を実装し、版数をv.04.1へ更新しまし�
 - 未検証: 別途の開発用ブラウザ確認はWebKitのiPhone縦相当とChromiumで4件成功。成果物は/tmp/okulab-aa6a3c67-development-smoke-confirmed配下です。独立Testの代替ではありません。
 - 未検証: 固定候補のReview3周、新仕様の網羅テスト、既存E2Eの完走は後続工程です。
 - 未検証: iOS/iPadOS・Windows実機、実Firebaseでの同期は未検証です。
+
+## 2026-10-17 Development: T-v041-001 修正
+
+- 実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+- 記録ID: aa6a3c67-develop-T-v041-001
+- 案件: Okulab_time / 工程: Development / 対象候補: 33147547748887a2d1c0ea9450e22feb8f53438f（開始コミット ff166d43bc8abc17fb1a104b79148f425d6f4f5a）
+- 対象ブランチ・修正差分は管理側で確定する。本記録とアプリ修正の書き込み担当はCodex。
+- T-v041-001（A-61・F-14-4）: js/store.js の parseRoomId が空入力・不正文字・桁数違いで投げる例外を、既存の userError に統一。describeError が userMessage を表示するため、入力に応じた案内がそのまま表示され、想定外エラーの再読み込み案内や console.error が出ない。検証順序・文言・正常入力の正規化・認証前の拒否は変更していない。
+- バージョンは同一依頼の初回実装で v.04.1 に更新済み。反復修正だけの増分を作らず、この版を維持して検証する。
+- TASKS.md・RSD.md・Review.md・Test.md、既存テスト・スタブ・配信設定は変更していない。コミット・別CLI起動・push・公開・配信・課金操作は行っていない。
+- 整合性9項目・単体133件・本文監査・空白検査は成功。ログ: /tmp/aa6-develop-verify.log、/tmp/aa6-develop-unit.log、/tmp/aa6-develop-audit.log。
+- ブラウザ実行: DEVFLOW_BROWSER_OUTPUT=/tmp/aa6-develop-t-v041-001 devflow-browser。実行ログ: /tmp/aa6-develop-t-v041-001.log。結果は下記の確定記録を参照。
+- 開発確認はUbuntu WebKit/Chromiumの端末エミュレーション。Firebaseは既存スタブ、外部通信遮断。本番への書き込みなし。iOS/iPadOS・Windows実機、実Firebase同期とルール実評価は未検証（今回の必須実機条件外）。独立Testの代替とはしない。
+- 次の担当: 管理側でこの差分と引き継がれたテスト変更を含む候補を確定し、別セッションのReviewを3周後、Claude CodeのTestで既存テストを変更せず再実行。Test.mdへの独立Test結果記録はTest担当へ依頼する。コミット・送達・工程起動は管理側担当で、開始済みとは報告しない。配信確認はマージ後の承認付き別工程。
+
+### T-v041-001 動作確認の確定結果
+
+- ブラウザE2E: 終了0、108件すべて成功（29.2分）。results.jsonでも expected=108 / unexpected=0 / skipped=0 / flaky=0 を確認。
+- A-61: iphone-portrait / iphone-landscape / ipad-portrait / ipad-landscape / desktop-chromium / iphone-320 の6条件すべて passed。指摘時のテストを変更せずに成功した。
+- 成果物: /tmp/aa6-develop-t-v041-001/results.json、/tmp/aa6-develop-t-v041-001/html/index.html、/tmp/aa6-develop-t-v041-001/test-results/。ログ: /tmp/aa6-develop-t-v041-001.log。
+- 必須checks5件（node tools/verify.js、node --test、devflow-browser、git diff --check、node tools/audit-passages.mjs）はすべて成功。検証後の変更は本記録のみ。
+- 作業開始時HEADは上記対象コミットと一致し、detached HEAD。既存の未コミット差分はなかった。今回の変更は js/store.js と DevelopProgress.md のみ。管理側がコミットと引き継ぎを実行する。
+- Development完了。T-v041-001は修正済み。独立Review3周・Testの再実施は後続工程であり未実施。
+
+<!-- devflow:aa6a3c67-3b6f-4514-a43f-bbc292ed21e7:develop:1:33147547748887a2d1c0ea9450e22feb8f53438f -->
+
+
+## 2026-10-17T09:54:29.363472+00:00 / develop / 周回1
+実行ID: aa6a3c67-3b6f-4514-a43f-bbc292ed21e7
+対象コミット: 33147547748887a2d1c0ea9450e22feb8f53438f
+
+Development完了。T-v041-001を修正し、ルームIDの入力エラーを適切な案内として表示するようにしました。同一依頼のv.04.1を維持し、DevelopProgress.mdを更新しました。必須チェック5件すべて成功。指定文書・テストは変更していません。
+- 未検証: 整合性9項目・単体133件・E2E108件が成功。A-61は6条件すべて成功。ブラウザ成果物: /tmp/aa6-develop-t-v041-001/。
+- 未検証: Ubuntu WebKit/ChromiumとFirebaseスタブによる確認です。iOS/iPadOS・Windows実機、実Firebase同期・ルール実評価は未検証です。本番への書き込みは行っていません。
+- 未検証: 修正候補の独立Review3周とTestは後続工程です。コミット・引き継ぎは管理側が実行します。公開・配信は未実施です。
