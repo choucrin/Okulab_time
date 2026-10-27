@@ -66,7 +66,6 @@ function createStoreFunctions() {
   const sessionsCol = extractConst(src, "sessionsCol");
   const sessionRef = extractConst(src, "sessionRef");
   const startSessionBody = extractFunction(src, "startSession");
-  const decideRandomSessionBody = extractFunction(src, "decideRandomSession");
 
   const wrapped = `
     (function () {
@@ -74,9 +73,8 @@ function createStoreFunctions() {
       const sessionsCol = ${sessionsCol};
       const sessionRef  = ${sessionRef};
       ${startSessionBody}
-      ${decideRandomSessionBody}
       ${extractFunction(src, "decideSequenceSession")}
-      return { startSession, decideRandomSession, decideSequenceSession };
+      return { startSession, decideSequenceSession };
     })()
   `;
 
@@ -182,59 +180,10 @@ describe("F-9 / R1-001・R1-002: startSession の受領記録(startReceipts)", (
   });
 });
 
-describe("F-9-10 / N-2-5: decideRandomSession(randomOutcomeの一度限りの更新)", () => {
-  function seedDoneRandomSession(store, overrides = {}) {
-    store.set("rooms/room-1/sessions/session-1", {
-      status: "done", mode: "random", startedBy: "uid-opener", randomOutcome: null,
-      durationMs: 5000, ...overrides,
-    });
-  }
-
-  test("Yes(confirmed)の判定を一度だけ書き込める", async () => {
-    const { decideRandomSession, store, db } = createStoreFunctions();
-    seedDoneRandomSession(store);
-    await decideRandomSession(db, "room-1", "session-1", "confirmed");
-    const session = store.get("rooms/room-1/sessions/session-1");
-    assert.equal(session.randomOutcome, "confirmed");
-    assert.equal(session.durationMs, 5000, "判定以外のフィールドは変更されない(N-2-5)");
-  });
-
-  test("同じ判定の再送(冪等)は許可されるが、異なる判定への変更は拒否される", async () => {
-    const { decideRandomSession, store, db } = createStoreFunctions();
-    seedDoneRandomSession(store);
-    await decideRandomSession(db, "room-1", "session-1", "discarded");
-    // 同一値の再送(通信不明による自動再試行)は成功する。
-    await decideRandomSession(db, "room-1", "session-1", "discarded");
-    assert.equal(store.get("rooms/room-1/sessions/session-1").randomOutcome, "discarded");
-    // 逆の判定への書き換えは拒否される(一度書き込んだら確定)。
-    await assert.rejects(() => decideRandomSession(db, "room-1", "session-1", "confirmed"));
-    assert.equal(store.get("rooms/room-1/sessions/session-1").randomOutcome, "discarded");
-  });
-
-  test("進行中(running)の記録には判定できない", async () => {
-    const { decideRandomSession, store, db } = createStoreFunctions();
-    store.set("rooms/room-1/sessions/session-1", { status: "running", mode: "random", startedBy: "uid-1", randomOutcome: null });
-    await assert.rejects(() => decideRandomSession(db, "room-1", "session-1", "confirmed"));
-  });
-
-  test("任意方式(mode:'free')の記録には判定できない", async () => {
-    const { decideRandomSession, store, db } = createStoreFunctions();
-    store.set("rooms/room-1/sessions/session-1", { status: "done", mode: "free", startedBy: "uid-1", randomOutcome: null });
-    await assert.rejects(() => decideRandomSession(db, "room-1", "session-1", "confirmed"));
-  });
-
-  test("許可されていない値は拒否される", async () => {
-    const { decideRandomSession, store, db } = createStoreFunctions();
-    seedDoneRandomSession(store);
-    await assert.rejects(() => decideRandomSession(db, "room-1", "session-1", "yes"));
-  });
-
-  test("存在しない記録には判定できない", async () => {
-    const { decideRandomSession, db } = createStoreFunctions();
-    await assert.rejects(() => decideRandomSession(db, "room-1", "missing", "confirmed"));
-  });
+test("旧ランダム判定の書込経路は廃止し、旧クライアント用ルールは維持する", () => {
+  assert.doesNotMatch(readSource('js/store.js'), /function decideRandomSession|tx\.update\(target, \{ randomOutcome:/);
+  assert.match(readSource('firestore.rules'), /hasOnly\(\['randomOutcome'\]\)/);
 });
-
 
 describe("F-13: 順序反復の作成・受領・専用判定", () => {
   const press = () => randomPress({mode:"sequence",randomBatchId:null,sequenceRunId:"run-1",sequenceTrial:2,sequenceSet:1,sequencePosition:2});

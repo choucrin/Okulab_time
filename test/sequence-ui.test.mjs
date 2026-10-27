@@ -10,7 +10,7 @@ test('追加条件・表示チップ・送信はクリック順でなくカタ�
   const h=createHarness();h.run(`randomSelection=new Set(${JSON.stringify(tags)})`);h.$('random-count').value='2';
   await h.$('random-add').fire('click'); assert.equal(h.run('JSON.stringify(randomDraft[0].tags)'),'["色:赤","音:低"]');
   await h.run('importSequence(randomDraft,2)'); h.run('renderRandom()');
-  assert.deepEqual(chipPairs(h.$('random-progress').children[0]),[['色','赤'],['音','低']]);
+  assert.deepEqual(chipPairs(h.$('sequence-next-body')),[['色','赤'],['音','低']]);
   await h.run('startSequence({synced:true,at:100})');assert.deepEqual(h.log.started[0].payload.tags,['色:赤','音:低']);
  }
 });
@@ -20,9 +20,9 @@ test('任意時の表示・未確定時の案内・前回なし・各区画と�
  h.run('sequenceMode="sequence";renderRandom()');assert.match(h.$('random-progress').textContent,/設定ページ/);
  await install(h);h.run('renderRandom()');
  const sections=h.$('random-progress').children;
- assert.deepEqual(sections.map(s=>s.children[0].textContent),['現在の条件','残り試行数','セット・位置','有効試行の完了数','実際の計測回数(再試行を含む)','前回の有効試行']);
- assert.equal(sections[1].children[1],'6 / 6 回');assert.equal(sections[5].children[1].textContent,'なし');
- assert.match(sections[2].textContent,/セット 1 \/ 2/);assert.equal(h.$('random-interrupt').disabled,false);
+ assert.deepEqual(sections.map(s=>s.children[0].textContent),['残り試行数','セット・位置','有効試行の完了数','実際の計測回数(再試行を含む)','前回の有効試行']);
+ assert.equal(sections[0].children[1],'6 / 6 回');assert.equal(sections[4].children[1].textContent,'なし');
+ assert.match(sections[1].textContent,/セット 1 \/ 2/);assert.equal(h.$('random-interrupt').disabled,false);
 });
 test('開閉ボタンの文言とaria-expanded、方式オフで保持しオンで同位置へ再開',async()=>{
  const h=createHarness();await install(h);await h.$('random-open').fire('click');assert.equal(h.$('random-open').getAttribute('aria-expanded'),'true');
@@ -80,13 +80,6 @@ test('再読み込みで同じ予約を購読し、観測後の削除だけ計�
  await b.notify({id:p.id,mode:'sequence',sequenceRunId:p.payload.sequenceRunId,status:'running'});assert.equal(b.stored().pending.observed,true);
  await b.notify(null);assert.equal(b.stored().attempts,1);assert.equal(b.stored().done,0);assert.equal(b.stored().pending,null);
 });
-test('旧セットは作成中へ読み込むだけで変更せず、旧バッチは決着・明示終了が必要',async()=>{
- const h=createHarness();const sets=[{name:'旧',items:[{tags:[],count:2}]}];h.backend['okulab-time/random/sets']=JSON.stringify(sets);h.run('renderSequenceSets()');h.$('legacy-saved').value='旧';await h.$('legacy-load').fire('click');
- assert.equal(h.stored(),null);assert.equal(h.run('sequenceSets'),1);assert.equal(h.backend['okulab-time/random/sets'],JSON.stringify(sets));await assert.rejects(h.run('importSequence(randomDraft,1)'));
- h.run('randomBatch={id:"old",items:[{tags:[],count:2,done:0}],next:0,pending:null,mode:"random"};randomSnapshot=JSON.stringify(randomBatch);localStorage.setItem(RANDOM_KEY+state.roomId,randomSnapshot)');
- await assert.rejects(install(h));h.log.answer=false;await h.$('legacy-end').fire('click');assert.equal(h.run('randomBatch.next'),0);
- h.log.answer=true;await h.$('legacy-end').fire('click');assert.equal(h.run('randomBatch.next'),null);assert.equal(h.run('randomBatch.items[0].count'),2);await install(h);assert.equal(h.stored().status,'active');
-});
 test('設定の項目移動・削除は番号と無効化を持ち、凍結済み実行を変更しない',async()=>{
  const h=createHarness();h.run(`randomDraft=${JSON.stringify(steps)};renderRandomSettings()`);
  const first=h.$('random-items').children[0];assert.equal(first.children[2].disabled,true);assert.match(first.children[3].getAttribute('aria-label'),/条件 1/);
@@ -103,7 +96,7 @@ test('カタログにないジャンルと符号化された名前の順序、�
  const h=createHarness();assert.equal(h.run('JSON.stringify(sortTags(["外:B","音:低","別:A","色:赤"]))'),'["色:赤","音:低","外:B","別:A"]');
  h.run('catalog=[{name:"色:分類",items:[]}]');assert.equal(h.run('JSON.stringify(sortTags(["外:B",catalogTag("色:分類","赤")]))'),'["色%3A分類:赤","外:B"]');
  h.run(`var original=${JSON.stringify(steps)}`);const original=h.run('JSON.stringify(original)');await h.run('importSequence(original,2)');assert.equal(h.run('JSON.stringify(original)'),original);
- const frozen=h.stored().steps;h.run('renderRandom()');assert.equal(h.$('random-progress').children[0].className,'trial-section trial-section--next');assert.equal(h.$('random-progress').children[1].className,'trial-section trial-section--next');
+ const frozen=h.stored().steps;h.run('renderRandom()');assert.equal(h.$('random-progress').children[0].className,'trial-section');assert.equal(h.$('sequence-next-title').textContent,'次の試行');assert.equal(h.$('sequence-next').hidden,false);
  h.context.localStorage.setItem=()=>{throw Error('保存不可');};await h.$('random-interrupt').fire('click');assert.equal(h.stored().status,'active');assert.deepEqual(h.stored().steps,frozen);
 });
 test('不正な保存パターンは保持、複数タブの同時保存は別名を失わず直列化',async()=>{
@@ -114,8 +107,6 @@ test('不正な保存パターンは保持、複数タブの同時保存は別�
  await Promise.all([a.$('random-save').fire('click'),b.$('random-save').fire('click')]);assert.deepEqual(JSON.parse(a.backend['okulab-time/sequence/sets']).map(p=>p.name).sort(),['A','B']);
  await install(a);await a.run('startSequence({at:100,synced:true})');await assert.rejects(install(a));assert.ok(a.stored().pending);
 });
-test('旧未完了バッチは新確定を遮断しつつ任意へ切替可能、セット数不正なら旧合計を残さない',async()=>{
- const h=createHarness();h.run('randomBatch={id:"old",items:[{tags:[],count:2,done:0}],next:0,pending:null,mode:"random"};sequenceMode="sequence";renderRandom()');
- h.$('measurement-mode').checked=false;await h.$('measurement-mode').fire('change');assert.equal(h.$('measurement-mode').checked,false);assert.equal(h.$('random-progress').hidden,true);assert.equal(h.run('randomBatch.next'),0);
- await assert.rejects(install(h));h.run(`randomDraft=${JSON.stringify(steps)};renderRandomSettings()`);h.$('sequence-sets').value='1e2';await h.$('sequence-sets').fire('input');assert.match(h.$('random-total').textContent,/総試行数: —/);assert.match(h.$('random-message').textContent,/半角数字/);
+test('セット数不正なら旧合計を残さない',async()=>{
+ const h=createHarness();h.run(`randomDraft=${JSON.stringify(steps)};renderRandomSettings()`);h.$('sequence-sets').value='1e2';await h.$('sequence-sets').fire('input');assert.match(h.$('random-total').textContent,/総試行数: —/);assert.match(h.$('random-message').textContent,/半角数字/);
 });

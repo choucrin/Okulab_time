@@ -1,11 +1,12 @@
 const {test,expect,seed,join} = require('./support/harness.cjs');
+const {expectLongPassage} = require('./support/reading.cjs');
 
 // v.04.1(F-14-1-1): 停止押下で文章を変えない。旧観点「新しい文章が先頭から表示」は e2e/v041.spec.cjs の手動変更へ移した。
 test('長文: 枠内末尾・通知と回転で保持・スクロール後の終了操作で文章を維持',async({page,context,appServer,blocked,isMobile})=>{
  const passphrase='reading-long';await seed(page,appServer,{passphrase});await join(page,appServer,{passphrase,role:'end'});
  await page.click('#btn-participant');
- const text=page.locator('#passage-text');await expect(text.locator('p')).toHaveCount(30);
- const before=await text.textContent();expect([...before.replace(/\s/gu,'')].length).toBeGreaterThanOrEqual(10000);
+ await expectLongPassage(page,expect);
+ const text=page.locator('#passage-text'),before=await text.textContent();
  const reading=page.locator('.reading');
  await reading.evaluate(e=>{e.scrollTop=e.scrollHeight;});
  expect(await reading.evaluate(e=>e.scrollTop)).toBeGreaterThan(0);

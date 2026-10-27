@@ -4,3 +4,6 @@ node_modules/
 .firebase/
 firebase-debug.log
 *.log
+
+# Developmentのローカル検証成果物（提出対象外）
+.development-checks/

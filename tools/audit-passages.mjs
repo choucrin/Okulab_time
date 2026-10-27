@@ -1,13 +1,16 @@
 // 本文編集の補助。共通表現の多さだけでは内容の独立性を判定できない。
 // 終了0は自動検査の合格であり、F-12-2の内容レビューの代替ではない。
 import { LONG_PASSAGES } from '../js/passages-long.js';
+import { passageRange, passageCharacters } from './passage-baseline.mjs';
 
 const width = 24;
 const occurrences = new Map();
 const lengths = [];
 for (const passage of LONG_PASSAGES) {
-  lengths.push({ id: passage.id, title: passage.title,
-    characters: [...passage.paragraphs.join('').replace(/\s/gu, '')].length });
+  const range = passageRange(passage.id);
+  const characters = passageCharacters(passage.paragraphs);
+  lengths.push({ id: passage.id, title: passage.title, ...range, characters,
+    ratio: (characters / range.baseline).toFixed(3) });
   passage.paragraphs.forEach((paragraph, index) => {
     const chars = [...paragraph.replace(/\s/gu, '')];
     // 同じ段落内の反復と、別段落への使い回しを分ける。
@@ -35,10 +38,11 @@ for (const [fragment, passages] of repeated) {
   const key = JSON.stringify(locations);
   if (!groups.has(key)) groups.set(key, { example: fragment, locations });
 }
-const invalidLengths = lengths.filter(p => p.characters < 10000 || p.characters > 12000);
+const invalidLengths = lengths.filter(p => p.characters < p.min || p.characters > p.max);
 console.log(JSON.stringify({
   note: '24文字以上の表現を3題以上で共有する段落を抽出。内容レビューは別途必要。',
   lengths,
+  invalidLengthIds: invalidLengths.map(p => p.id),
   repeatedGroupCount: groups.size,
   repeatedGroups: [...groups.values()],
 }, null, 2));

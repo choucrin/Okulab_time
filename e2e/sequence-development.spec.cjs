@@ -37,7 +37,7 @@ test('順序反復: 記録しないで同じ位置を再試行し、有効確定
     await expect(page.locator('#random-confirm')).toBeHidden();
   }
   expect((await saved()).previous).toEqual(['色:白']);
-  await expect(page.locator('#random-progress')).toContainText('赤');
+  await expect(page.locator('#sequence-next')).toContainText('赤');
 });
 
 test('順序反復: 確認待ちを再読み込みし、別タブの逆回答でも予定試行を二重消費しない',async({page,context,appServer})=>{

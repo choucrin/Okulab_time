@@ -79,7 +79,7 @@ for (const [condition, catalog] of [['カタログ無し(カタログを持た�
     const roomId = await seed(page, appServer, { catalog, passphrase, sessions: SESSIONS.map((s) => s.doc) });
     await join(page, appServer, { passphrase, role: 'start' });
     await expect(page.locator('#record-body tr')).toHaveCount(SESSIONS.length);
-    await expect(page.locator('#version')).toHaveText('v.04.1');
+    await expect(page.locator('#version')).toHaveText('v.05.0');
 
     // A-25: 見出しとセルの対応
     const headings = await page.locator('.table thead th').allTextContents();

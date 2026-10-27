@@ -2,6 +2,8 @@
 // Ubuntu 上の WebKit/Chromium による端末エミュレーションであり、iOS/iPadOS/Windows 実機の確認ではない。
 const { test, expect, seed, join, pageWidth, storedSessions, roomIdFor } = require('./support/harness.cjs');
 
+const { expectLongPassage } = require('./support/reading.cjs');
+
 const FAULT = '__okulab_e2e_tx_fault__';
 const CURRENT = 'okulab-time/reading-current';
 
@@ -41,7 +43,7 @@ test('A-47〜A-53・A-63: 停止で文章不変、往復で保持、計測中は
   await expect(page.locator('#room-id-panel')).toBeVisible();
 
   await page.click('#btn-participant');
-  await expect(page.locator('#passage-text p')).toHaveCount(30);
+  await expectLongPassage(page, expect);
   const before = await textOf(page);
   const shownKey = 'okulab-time/passages/long';
   const shown = () => page.evaluate(({ k, room }) => JSON.parse(localStorage.getItem(k))[room], { k: shownKey, room });
@@ -145,7 +147,7 @@ test('A-47〜A-53・A-63: 停止で文章不変、往復で保持、計測中は
   await page.click('#btn-change-passage');
   await page.click('#btn-participant');
   await expect(page.locator('#passage-text')).not.toHaveText(before);
-  await expect(page.locator('#passage-text p')).toHaveCount(30);
+  await expectLongPassage(page, expect);
   expect(await scrollOf(page)).toBe(0);
   const changed = await textOf(page);
   const shownAfter = await shown();
@@ -163,7 +165,7 @@ test('A-47〜A-53・A-63: 停止で文章不変、往復で保持、計測中は
   await scrollTo(page, 0.3);
   await page.reload();
   await expect(page.locator('#screen-participant')).toBeVisible();
-  await expect(page.locator('#passage-text p')).toHaveCount(30);
+  await expectLongPassage(page, expect);
   expect(await textOf(page)).toBe(changed);
   expect(await shown()).toEqual(shownAfter);
   expect(blocked).toEqual([]);
@@ -223,7 +225,7 @@ test('A-54・A-55: 段落の1行目だけを本文文字サイズの1文字分�
   await seed(page, appServer, { passphrase });
   await join(page, appServer, { passphrase, role: 'end' });
   await page.click('#btn-participant');
-  await expect(page.locator('#passage-text p')).toHaveCount(30);
+  await expectLongPassage(page, expect);
   const measure = () => page.locator('#passage-text').evaluate((root) => {
     const ps = [...root.querySelectorAll('p')];
     const styles = ps.map((p) => { const s = getComputedStyle(p); return { indent: parseFloat(s.textIndent), font: parseFloat(s.fontSize) }; });
@@ -497,7 +499,7 @@ test('A-65: 320/375/390px と各端末条件で参加画面・実験者用画面
     await page.locator('#room-id-full').scrollIntoViewIfNeeded();
     await noOverlap(['#room-id-full', '#btn-copy-room-id'], `${label} ルームID欄`);
     await page.click('#btn-participant');
-    await expect(page.locator('#passage-text p')).toHaveCount(30);
+    await expectLongPassage(page, expect);
     await noOverflow(`${label} 被験者用`);
     const w = await page.locator('.reading').evaluate((e) => ({ s: e.scrollWidth, c: e.clientWidth }));
     expect(w.s, label).toBeLessThanOrEqual(w.c);

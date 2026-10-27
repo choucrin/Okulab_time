@@ -138,6 +138,7 @@ export function startSession(db, roomId, press, sessionId, { existingOnly = fals
       sequenceRunId: press.mode === "sequence" ? press.sequenceRunId : null,
       sequenceTrial: press.mode === "sequence" ? press.sequenceTrial : null,
       sequenceSet: press.mode === "sequence" ? press.sequenceSet : null,
+      sequenceCondition: press.mode === "sequence" ? (press.sequenceCondition ?? null) : null,
       sequencePosition: press.mode === "sequence" ? press.sequencePosition : null,
       sequenceOutcome: null,
       startMs: press.at,
@@ -418,21 +419,6 @@ export async function fetchAllSessions(db, roomId) {
 }
 
 // 判定は同じ値の再送を許容し、異なる判定への変更は拒否する。
-export function decideRandomSession(db, roomId, id, outcome) {
-  return runTransaction(db, async (tx) => {
-    const target = sessionRef(db, roomId, id);
-    const snap = await tx.get(target);
-    const data = snap.exists() ? snap.data() : null;
-    if (!data || data.status !== "done" || data.mode !== "random"
-        || data.startedBy == null || !["confirmed", "discarded"].includes(outcome)) {
-      throw new Error("判定対象の記録を確認できません。");
-    }
-    if (data.randomOutcome === outcome) return;
-    if (data.randomOutcome != null) throw new Error("この記録は既に判定されています。");
-    tx.update(target, { randomOutcome: outcome });
-  });
-}
-
 export function decideSequenceSession(db, roomId, id, outcome) {
   return runTransaction(db, async (tx) => {
     const target = sessionRef(db, roomId, id);
