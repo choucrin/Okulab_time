@@ -704,3 +704,16 @@ a9cb1c2eのReview第3周（保守性・回帰・互換性）を完了しまし�
 - 未検証: 整合性9項目・単体134件・E2E114件が成功。E2Eは失敗・skip・flaky各0件。前周のR2-001対象も今回は成功。成果物: /tmp/okulab-review3-browser/results.json、html/index.html、test-results/。
 - 未検証: Ubuntu WebKit/ChromiumとFirebaseスタブによる検証です。iPhone・iPad・Windows実機、OS連携、実Firebaseの2端末同期、Firestoreルールエンジンの実評価は未検証です。
 - 未検証: 本結果はReview第3周の完了であり、工程全体の合格判定ではありません。独立Testと承認付き配信は未実施です。Review.mdへの記録は管理側へ引き継ぎます。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:1:e4ddd95611f47bfb2326bf30b6948fc0bd724f94 -->
+
+
+## 2026-10-28T14:33:25.061461+00:00 / review / 周回1
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: e4ddd95611f47bfb2326bf30b6948fc0bd724f94
+
+固定候補e4ddd956のReview第1周（要件・正しさ）を完了しました。新たな重要項目・指摘項目はありません。追加E2Eの要件対応、実装・互換性・配信手順、長文全10題の冒頭・中間・結末・加筆箇所を確認しました。必須5チェックはすべて成功（整合性9項目、単体134件、E2E144件、本文監査、空白検査）。候補ファイルは変更していません。本結果は工程全体の合格判定ではありません。
+- suggestion: R3-001（継続）: js/app.jsのrenderPatternEditorはラベル選択時にフォーム全体を再生成し、キーボードのフォーカスが失われます。選択した要素へのフォーカス維持を推奨します。
+- 未検証: ブラウザ成果物: /tmp/okulab-r1-browser/（results.json、html/index.html、test-results/）。ログ: /tmp/okulab-r1-browser.log。6条件144件成功、失敗・flaky・skip各0、38.7分。
+- 未検証: ブラウザ検証はUbuntu WebKit/ChromiumとFirebaseスタブによるものです。iPhone・iPad・Windows実機、ソフトウェアキーボード等のOS連携、実Firebaseの端末間同期、Firestoreルールエンジンの実評価は未検証です。
+- 未検証: ルール先行配信・公開・after-merge確認は承認付き別工程のため未実施です。
