@@ -1183,3 +1183,69 @@ F-15-8のE2E 1〜6の受け入れテストがなかったため、e2e/v050.spec.
 - 未検証: 実Firebaseでの端末間同期と、変更したfirestore.rulesの実際の評価（EmulatorやRules Playground）は未検証です。E2EはFirebaseのスタブで動かし、ルールは静的検査だけです。本番への書き込みは行っていません。
 - 未検証: 長文の物語としての質の通読は、Reviewによる全10題の確認に頼っています。Testで行ったのは機械検査と、10題の表示の確認です。
 - 未検証: ルールの先行配信、GitHub Pagesへの配信、after-mergeでの確認は、この自動工程の範囲外のため実施していません。
+
+## 2026-10-30 / test / 周回2(v.05.0・Test 追加テスト e2e/v050.spec.cjs のレビュー後の再テスト)
+
+- 実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+- 対象コミット: b3d6b3770646a3223d17c4885afdae26b68347ee(開始コミット 3b0e1e672c026eb25a7df1dcf64aef9b7a21341d)。e4ddd95 で追加した `e2e/v050.spec.cjs` を含む候補で Review 3周完了・重要/指摘0件(提案 R3-001 のみ)
+- 前回 Test(93b7331)からの差分: `Test.md`・`Review.md`・`e2e/v050.spec.cjs` のみ。アプリ本体・設定・スタブは不変
+- 環境: WSL2 Ubuntu、Node.js v24.21.0、Playwright 1.63.0(WebKit 26.6 / Chromium headless shell)。Firebase は `e2e/stubs` のスタブ(本番接続・書き込みなし)
+- 本周回ではテストコード・アプリ本体を変更していない(Test.md への記録のみ)
+
+### 実行コマンドと結果(作業ツリーは対象コミットと一致・未コミット差分なし)
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 9項目すべて成功 |
+| `node --test` | 0 | 134件成功、失敗・スキップ・中断0 |
+| `node tools/audit-passages.mjs` | 0 | `invalidLengthIds: []`、`repeatedGroupCount: 0` |
+| `devflow-browser`(`DEVFLOW_BROWSER_OUTPUT=/home/choucrin/projects/.automation-runs/browser-artifacts/896e4ff3420b50bddf69`) | 0 | 144件すべて成功(6条件×24件)、unexpected・flaky・skip 0、36.9分。成果物は同ディレクトリの `results.json`、`html/index.html`、`test-results/`。ログ `/home/choucrin/projects/.automation-runs/browser-artifacts/okulab-t2-browser.log` |
+| `git diff --check` | 0 | 成功 |
+
+補足: 同じ候補での1回目の E2E 実行(出力先 `/tmp/okulab-t2-browser`)は環境の再起動で中断・消失したため、結果に含めず全件を再実行した(上表)。
+
+### 受け入れ条件との対応
+
+A-68〜A-83 の対応は周回1(2026-10-28)の表と同じテストで再確認し、すべて成功。
+
+### 指摘事項
+
+- 重要項目: 0件。指摘項目: 0件。
+- 軽微項目(継続): T-v040-002(既存順序反復E2Eの負荷依存。今回は発生なし)、R3-001(管理画面のラベル選択でフォーカス喪失)、T-v050-001(`#measurement-mode` の一時的な表示戻り)。
+
+### 未実施・未検証
+
+- iPhone・iPad・Windows 実機(Ubuntu WebKit の端末エミュレーションは実機合格ではない)。iOS ソフトウェアキーボード表示時の挙動。
+- 実 Firebase の端末間同期と `firestore.rules` の実評価(静的検査のみ)。
+- 長文の物語品質の通読は Review に依拠。
+- ルール先行配信・Pages 配信・after-merge 確認(自動工程の範囲外)。
+
+### 結論
+
+自動検証の範囲で**合格**。必須チェック5件をすべて実行・成功し、Review・Test の未解決の重要項目・指摘項目は0件。本周回はテストコードを変更していないため、再レビューは不要。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:test:3:b3d6b3770646a3223d17c4885afdae26b68347ee -->
+
+
+## 2026-10-30T09:12:17.617051+00:00 / test / 周回3
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: b3d6b3770646a3223d17c4885afdae26b68347ee
+
+対象コミットb3d6b37（v.05.0）のTestを実施し、自動検証の範囲で合格です。必須5チェックはすべて実行し、すべて成功しました。
+- 整合性検証: 9項目成功
+- 単体テスト: 134件成功
+- 長文本文監査: 範囲外の題0件、重複群0件
+- ブラウザE2E: 6条件144件成功。unexpected・flaky・skipは各0件、36.9分
+- 空白エラー検査: 成功
+
+前回のTest（93b7331）からの変更は、Test.md・Review.md・e2e/v050.spec.cjsの3ファイルだけです。e2e/v050.spec.cjsはReviewの3周を終えています。今回はテストコードもアプリ本体も変更しておらず、変更したのはTest.mdへの記録だけです。
+
+1回目のE2E実行は環境の再起動で中断し、結果も失われました。このため結果には含めず、全件を実行し直しました。Review・Testで未解決の重要項目・指摘項目は0件です。
+- minor: R3-001（Reviewの提案・継続）: js/app.jsのrenderPatternEditorは、ラベルを選ぶたびに編集フォーム全体を作り直すため、キーボードのフォーカスが外れます。
+- minor: T-v050-001（継続）: 保存済みの実行がある状態で#measurement-modeを切り替えると、保存が終わるまでスイッチの表示がいったん元に戻ります。動作とデータへの影響はありません。
+- minor: T-v040-002（継続）: 既存のe2e/sequence-development.spec.cjs:57は、負荷が高いとタイミング次第で失敗することがあります。今回は発生しませんでした。
+- 未検証: E2Eの成果物は/home/choucrin/projects/.automation-runs/browser-artifacts/896e4ff3420b50bddf69にあります（results.json、html/index.html、test-results/）。ログは/home/choucrin/projects/.automation-runs/browser-artifacts/okulab-t2-browser.logです。
+- 未検証: iPhone・iPad・Windowsの実機は未検証です。結果はUbuntu上のWebKit/Chromiumによる端末エミュレーションで、実機合格ではありません。iOSのソフトウェアキーボードを表示したときの挙動も確認していません。
+- 未検証: 実Firebaseでの端末間同期と、firestore.rulesの実際の評価は未検証です。E2EはFirebaseのスタブで動かし、ルールは静的検査だけです。本番への書き込みは行っていません。
+- 未検証: 長文の物語としての質の通読は、Reviewの確認に頼っています。
+- 未検証: ルールの先行配信、GitHub Pagesへの配信、after-mergeでの確認は承認が必要な別工程のため、実施していません。
