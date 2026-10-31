@@ -666,3 +666,83 @@ a9cb1c2eのReview第3周（保守性・回帰・互換性）を完了しまし�
 固定候補4874d299844bee0926e9ca97baad5515c02b9439のReview第3周（保守性・回帰・互換性）を完了しました。指摘0件。必須チェック5件すべて成功（整合性9項目、単体133件、E2E108件）。候補ファイルは変更していません。本結果は全工程の合格を示すものではありません。
 - 未検証: ブラウザ成果物: /tmp/aa6-review3-4874d29/results.json、/tmp/aa6-review3-4874d29/html/index.html。Ubuntu WebKit/ChromiumとFirebaseスタブで検証しました。
 - 未検証: iOS/iPadOS・Windows実機、実Firebase同期・Firestoreルール実評価は未検証です。本番への書き込みは行っていません。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:1:d50e7b8c8901024c2f6e661dc5855d285bbc867a -->
+
+
+## 2026-10-27T11:01:56.216508+00:00 / review / 周回1
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: d50e7b8c8901024c2f6e661dc5855d285bbc867a
+
+固定候補d50e7b8のReview第1周（要件・正しさ）を完了。指摘0件。長文全10題（long-01〜long-10）の冒頭・中間・結末・加筆箇所について人物設定、時系列、因果関係、冗長性、接続を確認しました。UI・保存管理・互換性・配信手順も設計と照合済み。必須5チェック成功（単体134件、E2E114件）。候補ファイルは変更していません。
+- 未検証: ブラウザ成果物: /tmp/okulab-review1-browser/（results.json、html/index.html、test-results/）。Ubuntu上のWebKit/ChromiumとFirebaseスタブによる検証であり、iPhone・iPad・Windows実機、OS連携は未検証です。
+- 未検証: 実Firebaseの2端末同期とFirestoreルールエンジンの実評価は未実施です。
+- 未検証: Review第2・第3周、独立Test、配信は後続工程です。本結果は工程全体の合格判定ではありません。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:2:5b12ca4d8bd19fcfd9709d32b997c31b1a753904 -->
+
+
+## 2026-10-27T11:54:44.544392+00:00 / review / 周回2
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: 5b12ca4d8bd19fcfd9709d32b997c31b1a753904
+
+固定候補5b12ca4のReview第2周（セキュリティ・データ整合性）を完了。保存競合・破損時の保全、予約と確定通知、入力表示・CSV、Firestoreルールの互換性を確認し、アプリ不具合の確定指摘はありません。単体134件などは成功。E2Eは初回113件成功・1件失敗後、失敗項目を3回再実行して全成功。候補ファイルは変更していません。
+- minor: R2-001: e2e/v041.spec.cjs:206のiPad縦相当A-53が、判定欄の表示待ち5秒で一度失敗しました。失敗後のスクリーンショットでは判定欄が表示され、同条件の再実行3回は全成功しています。アプリ不具合は未確定ですが、独立Testで表示遅延と検証の安定性を確認してください。
+- 未検証: E2E成果物: /tmp/okulab-review2-browser/。再検証: /tmp/okulab-review2-browser-recheck/。各results.json、html/index.html、test-results/に保存。初回の一過性失敗は残存事項として記録しています。
+- 未検証: Ubuntu WebKit/ChromiumとFirebaseスタブによる検証です。iPhone・iPad・Windows実機、OS連携、実Firebaseの2端末同期、Firestoreルールエンジンの実評価は未検証です。
+- 未検証: Review第3周・独立Test・配信は後続工程です。本結果は工程全体の合格判定ではありません。Review.mdへの記録は管理側へ引き継ぎます。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:3:146588bb92b6571dc2eef779155c59a1f2783df0 -->
+
+
+## 2026-10-27T12:15:02.113407+00:00 / review / 周回3
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: 146588bb92b6571dc2eef779155c59a1f2783df0
+
+候補146588bb92b6571dc2eef779155c59a1f2783df0のReview第3周（保守性・回帰・互換性）を完了。保存形式・旧記録・CSVの互換性、テスト変更、長文全10題の文脈を確認しました。必須チェックはすべて成功。重要項目・指摘項目0件、任意改善1件です。候補ファイルは変更していません。
+- suggestion: R3-001: js/app.js:2924でラベル変更のたびに編集フォーム全体を再生成するため、キーボードフォーカスが失われます。Chromiumで管理画面のチェックボックスへフォーカスしてSpaceを押すと、document.activeElementがBODYになることを再現しました。連続操作しやすいよう、対象要素だけを更新するか、再描画後にフォーカスを復元してください。再現テスト: /tmp/okulab-review3-focus/focus.spec.cjs。
+- 未検証: 整合性9項目・単体134件・E2E114件が成功。E2Eは失敗・skip・flaky各0件。前周のR2-001対象も今回は成功。成果物: /tmp/okulab-review3-browser/results.json、html/index.html、test-results/。
+- 未検証: Ubuntu WebKit/ChromiumとFirebaseスタブによる検証です。iPhone・iPad・Windows実機、OS連携、実Firebaseの2端末同期、Firestoreルールエンジンの実評価は未検証です。
+- 未検証: 本結果はReview第3周の完了であり、工程全体の合格判定ではありません。独立Testと承認付き配信は未実施です。Review.mdへの記録は管理側へ引き継ぎます。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:1:e4ddd95611f47bfb2326bf30b6948fc0bd724f94 -->
+
+
+## 2026-10-28T14:33:25.061461+00:00 / review / 周回1
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: e4ddd95611f47bfb2326bf30b6948fc0bd724f94
+
+固定候補e4ddd956のReview第1周（要件・正しさ）を完了しました。新たな重要項目・指摘項目はありません。追加E2Eの要件対応、実装・互換性・配信手順、長文全10題の冒頭・中間・結末・加筆箇所を確認しました。必須5チェックはすべて成功（整合性9項目、単体134件、E2E144件、本文監査、空白検査）。候補ファイルは変更していません。本結果は工程全体の合格判定ではありません。
+- suggestion: R3-001（継続）: js/app.jsのrenderPatternEditorはラベル選択時にフォーム全体を再生成し、キーボードのフォーカスが失われます。選択した要素へのフォーカス維持を推奨します。
+- 未検証: ブラウザ成果物: /tmp/okulab-r1-browser/（results.json、html/index.html、test-results/）。ログ: /tmp/okulab-r1-browser.log。6条件144件成功、失敗・flaky・skip各0、38.7分。
+- 未検証: ブラウザ検証はUbuntu WebKit/ChromiumとFirebaseスタブによるものです。iPhone・iPad・Windows実機、ソフトウェアキーボード等のOS連携、実Firebaseの端末間同期、Firestoreルールエンジンの実評価は未検証です。
+- 未検証: ルール先行配信・公開・after-merge確認は承認付き別工程のため未実施です。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:2:a3c1dcddf410840446a6ca4fd7f6db3e0782761b -->
+
+
+## 2026-10-30T06:12:03.775308+00:00 / review / 周回2
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: a3c1dcddf410840446a6ca4fd7f6db3e0782761b
+
+固定候補a3c1dcddのReview第2周（セキュリティ・データ整合性）を完了しました。保存競合、保存失敗時の保全、実行状態との分離、入力表示・CSV、Firestoreルールの互換性と更新制限を確認し、新たな重要項目・指摘項目はありません。候補ファイルは変更していません。工程全体の合格判定ではありません。
+- suggestion: R3-001（継続）: js/app.jsのrenderPatternEditorはラベル選択時にフォーム全体を再生成し、キーボードのフォーカスが失われます。選択要素へのフォーカス維持を推奨します。
+- 未検証: 本セッション前半に整合性9項目、単体134件、本文監査、空白検査の成功を確認しました。
+- 未検証: E2E再実行は4件成功後に重複検証として停止しました。2件中断・138件未実施のため、今回の全必須チェック成功とは扱いません。
+- 未検証: 第1周の引き継ぎではE2E144件成功と報告されています。e4ddd956から今回候補までの差分はReview.mdのみですが、前回成果物の直接再確認はできていません。
+- 未検証: 前半の成果物保存先は/tmp/okulab-r2-browser/、ログは/tmp/okulab-r2-browser.logと/tmp/okulab-r2-unit.logでした。再開後はログが存在せず、再参照できません。
+- 未検証: iOS・iPadOS・Windows実機、実Firebaseの端末間同期、Firestoreルールエンジンの実評価は未検証です。配信は承認付き別工程です。
+
+<!-- devflow:3f318e2b-b55b-408f-b790-841ac70dfd13:review:3:476b5f648e41638dae500f86b5ae631b2f355820 -->
+
+
+## 2026-10-30T06:51:37.869861+00:00 / review / 周回3
+実行ID: 3f318e2b-b55b-408f-b790-841ac70dfd13
+対象コミット: 476b5f648e41638dae500f86b5ae631b2f355820
+
+候補476b5f648e41638dae500f86b5ae631b2f355820のReview第3周（保守性・回帰・互換性）を完了しました。保存形式・旧記録・CSVの互換性、テスト変更、配信手順を確認し、新たな重要項目・指摘項目はありません。必須5チェックはすべて成功しました。候補ファイルは変更していません。工程全体の合格判定ではありません。
+- suggestion: R3-001（継続）: js/app.js:2924のrenderPatternEditorはラベル選択時にフォーム全体を再生成し、キーボードフォーカスが失われます。再描画後に選択要素へフォーカスを復元する改善を推奨します。
+- 未検証: 実行結果: 整合性9項目、単体134件、本文監査、空白検査が成功。E2Eは6条件144件成功、失敗・skip・flaky各0、終了コード0、38.7分。
+- 未検証: 成果物: /tmp/okulab-r3-browser/results.json、html/index.html、test-results/。ログ: /tmp/okulab-r3-browser.log、/tmp/okulab-r3-unit.log、/tmp/okulab-r3-audit.log。Review.mdへの記録は管理側へ引き継ぎます。
+- 未検証: ブラウザ検証はUbuntu WebKit/Chromiumの端末エミュレーションとFirebaseスタブによるものです。iOS・iPadOS・Windows実機、OS連携、実Firebaseの端末間同期、Firestoreルールエンジンの実評価は未検証です。
+- 未検証: 変更したテストを含む候補での独立Test再実施は後続工程です。ルール先行配信・公開・after-merge確認は承認付き別工程であり、実施していません。

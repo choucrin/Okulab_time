@@ -6,6 +6,14 @@ export function sequenceInteger(value, max, label) {
   return n;
 }
 
+export function sequenceCondition(value) {
+  if (value == null) return null;
+  if (typeof value !== "string" || /\p{Cc}/u.test(value)) throw new Error("条件名に制御文字は使えません。");
+  const name = value.trim();
+  if ([...name].length > 80) throw new Error("条件名は80文字までで入力してください。");
+  return name || null;
+}
+
 export function validateSequence(steps, sets) {
   if (typeof sets !== "number") throw new Error("セット数が不正です。");
   sequenceInteger(sets, 100, "セット数");
@@ -13,10 +21,12 @@ export function validateSequence(steps, sets) {
   for (const step of steps) {
     if (!step || typeof step.count !== "number") throw new Error("実施回数が不正です。");
     sequenceInteger(step.count, 50, "実施回数");
-    if (!Array.isArray(step.tags) || step.tags.length < 1 || step.tags.length > 20
+    const condition = sequenceCondition(step.condition);
+    if (Array.isArray(step.tags) && !step.tags.length && !condition) throw new Error("ラベルを選ぶか条件名を入力してください。");
+    if (!Array.isArray(step.tags) || step.tags.length > 20
         || step.tags.some((t) => typeof t !== "string" || t.length > 241 || !/^.+:.+$/.test(t))
         || new Set(step.tags.map((t) => t.slice(0, t.indexOf(":")))).size !== step.tags.length) {
-      throw new Error("条件にはジャンルごとに1個、合計1〜20個のラベルが必要です。");
+      throw new Error("条件にはジャンルごとに1個、合計0〜20個のラベルが必要です。");
     }
   }
   const perSet = steps.reduce((n, step) => n + step.count, 0);
@@ -34,6 +44,7 @@ export function sequencePosition(steps, sets, done) {
   for (let index = 0; index < steps.length; index++) {
     if (within < offset + steps[index].count) return {
       index, set: Math.floor(done / perSet) + 1, position: within + 1,
+      condition: sequenceCondition(steps[index].condition),
       repeat: within - offset + 1, tags: [...steps[index].tags],
     };
     offset += steps[index].count;
@@ -56,7 +67,8 @@ export function validateSequenceRun(run) {
     if (run.status !== "active" || typeof p.id !== "string" || !p.id || p.trial !== run.done + 1
         || p.receiptVersion !== 1 || p.payload?.mode !== "sequence" || p.payload.sequenceRunId !== run.id
         || p.payload.sequenceTrial !== p.trial || p.payload.sequenceSet !== pos.set
-        || p.payload.sequencePosition !== pos.position || JSON.stringify(p.payload.tags) !== JSON.stringify(pos.tags)
+        || p.payload.sequencePosition !== pos.position
+        || (p.payload.sequenceCondition ?? null) !== pos.condition || JSON.stringify(p.payload.tags) !== JSON.stringify(pos.tags)
         || typeof p.payload.uid !== "string" || !Number.isFinite(p.payload.at)) {
       throw new Error("保存済み開始操作が不正です。");
     }

@@ -731,3 +731,18 @@ button:focus-visible {
 .join-methods label { display: block; margin: .5rem 0; }
 #room-id-panel { min-width: 0; overflow-wrap: anywhere; }
 #room-id-full { display: block; box-sizing: border-box; width: 100%; min-width: 0; font-family: monospace; margin: .5rem 0; }
+
+/* 条件名と全ラベルを省略せず折り返す。 */
+#sequence-next { min-width: 0; overflow-wrap: anywhere; }
+#sequence-next h2 { font-size: 1rem; margin: 0 0 8px; }
+#sequence-next h3 { font-size: 1.3rem; }
+
+#patterns-dialog { width: min(42rem, calc(100vw - 24px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow-y: auto; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); padding: 16px; }
+#patterns-dialog::backdrop { background: #0008; }
+#patterns-editor fieldset { min-width: 0; margin: 12px 0; border: 1px solid var(--border); }
+#patterns-editor input[type="text"] { width: 100%; min-width: 0; box-sizing: border-box; }
+#patterns-dialog button { min-height: 44px; }
+.topbar__right { flex-wrap: wrap; justify-content: flex-end; }
+
+/* 方式欄は既存の一行表示を維持し、条件名の明示改行だけを表示する。 */
+.table-wrap td:nth-child(4) { white-space: pre; }

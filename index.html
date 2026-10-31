@@ -112,6 +112,7 @@
       <span class="pill pill--muted" id="pill-room">room —</span>
     </div>
     <div class="topbar__right">
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-patterns" hidden>パターン管理</button>
       <span class="pill pill--muted" id="pill-clock">同期中…</span>
       <button type="button" class="btn btn--ghost btn--sm" id="btn-leave">退出</button>
     </div>
@@ -143,16 +144,11 @@
         <p id="random-saved-empty">保存済みパターンはありません</p>
         <button type="button" class="btn" id="random-load">呼び出して計測に使う</button>
       </div>
-      <div id="legacy-controls" hidden>
-        <p id="legacy-status"></p>
-        <label class="field">旧ランダム設定<select id="legacy-saved"></select></label>
-        <button type="button" class="btn" id="legacy-load">旧設定を作成中の内容に読み込む</button>
-        <button type="button" class="btn" id="legacy-end">旧ランダムバッチを終了</button>
-      </div>
       <button type="button" class="btn" id="random-open" aria-expanded="false" aria-controls="random-settings" hidden>順序反復条件設定を開く ›</button>
       <section id="random-settings" class="catalog" aria-label="順序反復条件設定ページ" hidden>
         <h2>順序反復条件設定</h2>
         <div id="random-options"></div>
+        <label class="field">条件名(自由入力・80文字まで)<input id="sequence-condition" type="text"></label>
         <label class="field">実施回数<input id="random-count" type="text" inputmode="numeric" value="1"></label>
         <button type="button" class="btn" id="random-add">項目を追加</button>
         <div id="random-items"></div>
@@ -184,6 +180,10 @@
       <section id="random-progress" aria-label="順序反復試行状況" hidden></section>
       <button type="button" class="btn btn--danger" id="random-interrupt" aria-describedby="random-interrupt-hint" hidden>順序反復計測を中断</button>
       <button type="button" class="btn" id="random-retry" hidden>保存した開始操作を再送・確認</button>
+      <section id="sequence-next" class="trial-section trial-section--next" aria-labelledby="sequence-next-title" hidden>
+        <h2 id="sequence-next-title">次の試行</h2>
+        <div id="sequence-next-body"></div>
+      </section>
       <button type="button" class="bigbtn bigbtn--start" id="btn-start" disabled>
         <span class="bigbtn__title">計測開始</span>
         <span class="bigbtn__sub" id="start-sub">接続中…</span>
@@ -285,10 +285,19 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.04.1</p>
+<p class="version" id="version">v.05.0</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+<dialog id="patterns-dialog" aria-labelledby="patterns-title">
+  <h2 id="patterns-title">保存パターンの管理</h2>
+  <p>編集・削除は保存済みの定義だけに反映されます。実行中の順序反復は変わりません。次に呼び出して確定したときから使われます。</p>
+  <p id="patterns-lock" role="status"></p>
+  <p id="patterns-message" role="status"></p>
+  <div id="patterns-list"></div>
+  <form id="patterns-editor" hidden></form>
+  <button type="button" class="btn" id="patterns-close">閉じる</button>
+</dialog>
 <script type="module" src="./js/app.js"></script>
 </body>
 </html>

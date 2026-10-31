@@ -18,7 +18,7 @@ function run() {
 test('順序反復: 白2・赤1を2セット、境界と終了位置', () => {
   assert.deepEqual(Array.from({ length: 6 }, (_, n) => sequencePosition(steps, 2, n).tags[0]),
     ['色:白', '色:白', '色:赤', '色:白', '色:白', '色:赤']);
-  assert.deepEqual(sequencePosition(steps, 2, 4), { index: 0, set: 2, position: 2, repeat: 2, tags: ['色:白'] });
+  assert.deepEqual(sequencePosition(steps, 2, 4), { index: 0, set: 2, position: 2, repeat: 2, tags: ['色:白'], condition: null });
   assert.equal(sequencePosition(steps, 2, 6), null);
   assert.throws(() => sequencePosition(steps, 2, 7));
 });
@@ -76,7 +76,7 @@ test('Firestore: 基準版の条件は追加箇所を除いて全文一致し、
   restored = restored.slice(0, added) + restored.slice(restored.indexOf('      function validCreate()', added));
   restored = restored.replace(".data.mode in ['random', 'sequence']", ".data.mode == 'random'")
     .replace('((validRandomCreate() && emptySequence()) || validSequenceCreate())', 'validRandomCreate()')
-    .replace("                 'sequenceRunId', 'sequenceTrial', 'sequenceSet', 'sequencePosition', 'sequenceOutcome',\n", '')
+    .replace("                 'sequenceRunId', 'sequenceTrial', 'sequenceSet', 'sequencePosition', 'sequenceOutcome', 'sequenceCondition',\n", '')
     .replace(' || validSequenceOutcome()', '');
   assert.equal(restored, old);
   assert.equal(extractFunction(current, 'validUpdate'), extractFunction(old, 'validUpdate'));

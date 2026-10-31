@@ -124,7 +124,8 @@ service cloud.firestore {
             && incoming().get('sequenceTrial', null) == null
             && incoming().get('sequenceSet', null) == null
             && incoming().get('sequencePosition', null) == null
-            && incoming().get('sequenceOutcome', null) == null;
+            && incoming().get('sequenceOutcome', null) == null
+            && incoming().get('sequenceCondition', null) == null;
       }
 
       function validSequenceCreate() {
@@ -140,7 +141,11 @@ service cloud.firestore {
             && incoming().sequenceSet >= 1 && incoming().sequenceSet <= 100
             && incoming().sequencePosition is int
             && incoming().sequencePosition >= 1 && incoming().sequencePosition <= 300
-            && validTags(incoming().tags) && incoming().tags.size() >= 1
+            && (incoming().get('sequenceCondition', null) == null
+                || (incoming().sequenceCondition is string
+                    && incoming().sequenceCondition.size() >= 1 && incoming().sequenceCondition.size() <= 200))
+            && validTags(incoming().tags)
+            && (incoming().tags.size() >= 1 || incoming().get('sequenceCondition', null) is string)
             && getAfter(/databases/$(database)/documents/rooms/$(roomId)/startReceipts/$(sessionId)).data.startedBy == request.auth.uid;
       }
 
@@ -165,7 +170,7 @@ service cloud.firestore {
             && incoming().endMs == null
             && incoming().keys().hasOnly([
                  'status', 'label', 'tags', 'mode', 'randomBatchId', 'randomOutcome',
-                 'sequenceRunId', 'sequenceTrial', 'sequenceSet', 'sequencePosition', 'sequenceOutcome',
+                 'sequenceRunId', 'sequenceTrial', 'sequenceSet', 'sequencePosition', 'sequenceOutcome', 'sequenceCondition',
                  'startMs', 'startRawMs', 'startOffsetMs', 'startAccuracyMs',
                  'startSynced', 'startedBy', 'startedAt',
                  'endMs', 'endRawMs', 'endOffsetMs', 'endAccuracyMs',

@@ -163,11 +163,8 @@ check("Firestore ルールと送信フィールド", () => {
   // ランダム判定は終了更新とは独立した許可リストと照合する。
   const outcomeAllow = lists.find((list) => list.length === 1 && list[0] === "randomOutcome");
   must(outcomeAllow, "ランダム判定専用の許可リストがありません");
-  const outcomeBlock = store.match(/tx\.update\(target, \{([^}]+)\}\);/);
-  must(outcomeBlock, "ランダム判定の更新処理がありません");
-  const outcomeFields = [...outcomeBlock[1].matchAll(/(\w+):/g)].map((match) => match[1]);
-  must(outcomeFields.length === 1 && outcomeFields[0] === outcomeAllow[0],
-    "ランダム判定で専用項目以外を更新しています");
+  must(!/tx\.update\([^,]+, \{\s*randomOutcome:/.test(store),
+    "store に廃止済みのランダム判定更新が残っています");
 
   const sequenceAllow = lists.find((list) => list.length === 1 && list[0] === "sequenceOutcome");
   const sequenceUpdate = store.match(/tx\.update\(target, \{ sequenceOutcome: outcome \}\);/);
