@@ -793,3 +793,17 @@ Review第2周（セキュリティとデータ整合性）完了。新規指摘0
 - 未検証: Ubuntu上のWebKit/ChromiumとFirebaseスタブによる検証です。iPhone・iPad・Windows実機、実OSの慣性スクロールとフォント、実Firebase同期、FirestoreルールのEmulator実評価は未検証です。実機確認は今回のPR提出前は任意です。
 - 未検証: 送信中（state.sending）の文章変更禁止は実装を確認しましたが、E2Eでは直接再現していません。
 - 未検証: 公開・配信・after-merge確認は承認付きの別工程です。
+
+<!-- devflow:e7c2aed2-46b4-4ee8-abad-2e6ccacb9190:review:2:4c7984eb167f47d47a2f9a368b3c0c9a10b707fa -->
+
+
+## 2026-11-05T08:06:38.916772+00:00 / review / 周回2
+実行ID: e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+対象コミット: 4c7984eb167f47d47a2f9a368b3c0c9a10b707fa
+
+固定候補4c7984ebのReview第2周（セキュリティとデータ整合性）を完了しました。新規指摘なし。必須5チェック成功（整合性10項目、単体144件、原典照合、E2E216件、空白検査）。E2Eは52.2分、失敗・skip・flaky各0件。候補ファイルは未変更です。工程全体の合格判定ではありません。
+- minor: R1-001（継続）: README.md:496の切戻し手順ではREADING_SETをlong/shortへ変更してnode --testを実行しますが、test/reading.test.mjs:42がaozora固定を検査するため失敗します。
+- suggestion: R3-001（継続）: 管理画面のラベル選択でフォームが再生成され、キーボードフォーカスが失われます。再描画後のフォーカス維持を推奨します。
+- 未検証: 成果物: /tmp/e7c2-r2-resume-browser/（results.json、html/index.html、trace216件、スクリーンショット456件）。ログ: /tmp/e7c2-r2-resume-{verify,unit,audit,browser}.log。状態: /tmp/e7c2-r2-resume-state.json。管理側によるReview.md記録へ引き継ぎます。
+- 未検証: UbuntuのWebKit/ChromiumとFirebaseスタブによる検証です。実iPhone・iPad・Windows、実OSの慣性スクロール、実Firebase同期、FirestoreルールのEmulator評価は未検証です。実機確認はPR提出前は任意です。
+- 未検証: 公開・配信・after-merge確認は承認付きの別工程です。
