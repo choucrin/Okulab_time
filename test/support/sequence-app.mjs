@@ -1,4 +1,5 @@
 import vm from 'node:vm';
+import { watchSequenceRecord } from '../../js/sequence-watch.js';
 import * as sequence from '../../js/sequence.js';
 import { readSource, extractFunction } from './extract-app-functions.mjs';
 import { createSharedLockManager, createSharedStorageBackend, createLocalStorage } from './sandbox.mjs';
@@ -35,6 +36,7 @@ export function createHarness({ backend = createSharedStorageBackend(), locks = 
   const log = { confirms: [], aborts: [], started: [], decisions: [], subscriptions: [], answer: true, failDecision: false };
   let id = 0;
   const context = vm.createContext({ ...sequence, $, console, structuredClone,
+    watchSequenceRecord: options => watchSequenceRecord({ ...options, interval: 2147483647 }),
     localStorage: createLocalStorage(backend), navigator: {locks},
     document: {createElement: t => new FakeElement(t), createTextNode: t => String(t)},
     el: {catalogOptions: new FakeElement(), inputLabel: {value:''}},

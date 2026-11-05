@@ -1,2 +1,2 @@
-// 旧短文へ切り戻す場合は、この1か所だけを "short" に変更する。
-export const READING_SET = "long";
+// 切替点: "aozora"(通常) / "long"(旧長文) / "short"(旧短文)。
+export const READING_SET = "aozora";

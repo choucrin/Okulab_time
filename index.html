@@ -163,6 +163,7 @@
         <input type="text" id="input-label" maxlength="80"
                autocomplete="off" autocapitalize="off" spellcheck="false"
                placeholder="被験者名・条件名など">
+        <span id="free-label-hint" class="muted" role="status"></span>
       </label>
       <section class="catalog" aria-label="選択式ラベル">
         <p>選択式ラベル（各ジャンル1個まで・最大20個）</p>
@@ -204,6 +205,7 @@
         <span class="bigbtn__sub" id="end-sub">接続中…</span>
       </button>
       <button type="button" class="btn btn--ghost switch-ui" id="btn-change-passage">文章を変更</button>
+      <p id="current-passage" class="muted" role="status"></p>
       <p id="passage-change-hint" class="muted" role="status"></p>
       <button type="button" class="btn btn--ghost switch-ui" id="btn-participant">
         被験者用の画面に切り替える
@@ -285,7 +287,7 @@
 </section>
 
 <!-- どの画面でも確認できるよう、画面の外に置く -->
-<p class="version" id="version">v.05.0</p>
+<p class="version" id="version">v.05.1</p>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

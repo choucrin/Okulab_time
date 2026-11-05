@@ -5,6 +5,8 @@
 // (test/support/extract-app-functions.mjs)。ブラウザでの動作は e2e/v041.spec.cjs で確認する。
 
 import test from "node:test";
+import { passageElements } from "../js/reading-render.js";
+import { FakeElement } from "./support/sequence-app.mjs";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { webcrypto } from "node:crypto";
@@ -101,11 +103,11 @@ test("A-63: 文章変更・ルームIDの操作は被験者用画面の外にあ
 
 test("A-54/A-55: 字下げは本文段落だけに CSS の text-indent:1em で行い、原文に空白を足さない", () => {
   const indents = [...css.matchAll(/([^{}]+)\{[^}]*text-indent\s*:\s*([^;}]+)/g)].map((m) => [m[1].trim(), m[2].trim()]);
-  assert.deepEqual(indents, [[".reading__text p", "1em"]]);
+  assert.deepEqual(indents, [[".reading__text p", "1em"], [".reading__text p.reading-no-indent", "0"]]);
   const rule = /\.reading__text p\s*\{([^}]*)\}/.exec(css)[1];
   assert.doesNotMatch(rule, /padding-left|margin-left|hanging|each-line/);
   assert.match(rule, /margin:\s*0 0 1\.2em/);
-  assert.match(extractFunction(appSrc, "displayPassage"), /p\.textContent = text;/);
+  assert.match(extractFunction(appSrc, "displayPassage"), /passageElements\(passage, document\)/);
   for (const p of [...LONG_PASSAGES.flatMap((x) => x.paragraphs), ...PASSAGES]) {
     assert.equal(p, p.trimStart(), "原文の段落先頭に空白が無い");
   }
@@ -127,13 +129,14 @@ function createReadingTab({ storage = new Map(), set = "long", roomId = "r1" } =
   };
   const ctx = {
     localStorage, JSON, Map, Array, Math,
-    document: { createElement: () => ({ textContent: "" }) },
+    document: { createElement: t => new FakeElement(t) },
+    passageElements, readingSet: dataset.set, readingSelection: dataset.selection, $: () => new FakeElement(),
     el: { passageText }, state: { roomId },
     READ_KEY: dataset.key, READING_PASSAGES: dataset.passages, validShown, selectReading,
   };
   const api = vm.runInNewContext(`(() => {
     const CURRENT_READING_KEY = ${extractConst(appSrc, "CURRENT_READING_KEY")};
-    const readingSet = ${extractConst(appSrc, "readingSet")};
+
     const currentPassages = new Map();
     const shownPassages = new Map();
     let passageScroll = 0, passageChanged = false;
@@ -196,4 +199,21 @@ test("F-14-1-6: 手動変更の保存は他データセット・他ルームの�
   const other = createReadingTab({ storage, roomId: "other" });
   other.ensurePassage();
   assert.equal(other.text(), LONG_PASSAGES.find((p) => p.id === "long-02").paragraphs.join(""));
+});
+
+test('F-16: aozoraは初期人間椅子・交互切替・ルーム別復元で旧保存内容を変更しない', () => {
+  const old = {long:{r1:'long-03'},short:{r1:7}};
+  const storage = new Map([['okulab-time/reading-current',JSON.stringify(old)],['okulab-time/passages','旧短文の履歴'],['okulab-time/passages/long','旧長文の履歴']]);
+  const tab=createReadingTab({storage,set:'aozora'});tab.ensurePassage();
+  assert.equal(JSON.parse(storage.get('okulab-time/reading-current')).aozora.r1,'aozora-56648');
+  tab.nextPassage();assert.equal(JSON.parse(storage.get('okulab-time/reading-current')).aozora.r1,'aozora-57521');
+  const reload=createReadingTab({storage,set:'aozora'});reload.ensurePassage();assert.equal(reload.text(),tab.text());
+  tab.nextPassage();assert.equal(JSON.parse(storage.get('okulab-time/reading-current')).aozora.r1,'aozora-56648');
+  const saved=JSON.parse(storage.get('okulab-time/reading-current'));assert.deepEqual(saved.long,old.long);assert.deepEqual(saved.short,old.short);
+  assert.equal(storage.get('okulab-time/passages'),'旧短文の履歴');assert.equal(storage.get('okulab-time/passages/long'),'旧長文の履歴');
+  assert.equal(storage.has('okulab-time/passages/aozora'),false);
+  for(const raw of ['{broken',JSON.stringify({aozora:[]}),JSON.stringify({aozora:null}),JSON.stringify({aozora:'broken'})]) {
+    const other=createReadingTab({set:'aozora',storage:new Map([['okulab-time/reading-current',raw]])});other.ensurePassage();other.nextPassage();
+    assert.equal(other.storage.get('okulab-time/reading-current'),raw);assert.ok(other.text().length);
+  }
 });

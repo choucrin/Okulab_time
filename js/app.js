@@ -9,15 +9,19 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebas
 import { firebaseConfig } from "./firebase-config.js";
 import { ClockSync } from "./clock.js";
 import { sequenceCondition, sequenceInteger, validateSequence, sequencePosition, validateSequenceRun, settleSequenceRun } from "./sequence.js";
+import { watchSequenceRecord } from "./sequence-watch.js";
+import { bindTimedPress } from "./press-button.js";
+import { bindFreeLabel } from "./free-label.js";
+import { passageElements } from "./reading-render.js";
 import { readingDataset, validShown, selectReading } from "./reading.js";
 import {
   deriveRoomId, parseRoomId, newSessionId, startSession, endSession, abortSession, deleteSession,
   subscribeSessions, subscribeCurrent, fetchCurrentFromServer, fetchAllSessions,
   collectDeletable, deleteSessions, isUncertain, SESSION_LIMIT,
-  decideSequenceSession, subscribeRandomSession,
+  decideSequenceSession, subscribeRandomSession, fetchSequenceRecordFromServer,
 } from "./store.js";
 
-export const APP_VERSION = "v.05.0";
+export const APP_VERSION = "v.05.1";
 
 const CATALOG_KEY = "okulab-time/catalog";
 let catalog = [];
@@ -25,7 +29,7 @@ let catalogSnapshot = null;
 const selectedTags = new Set();
 
 const STORAGE_KEY = "okulab-time/session";
-const { key: READ_KEY, passages: READING_PASSAGES } = readingDataset();   // ルームごとに既出の文章を覚えておく
+const { set: readingSet, selection: readingSelection, key: READ_KEY, passages: READING_PASSAGES } = readingDataset();   // ルームごとに既出の文章を覚えておく
 const LATE_KEY = "okulab-time/late";       // 退出後に終わった操作の結果(再読み込みでも失わない)
 const MAX_LATE_REPORTS = 20;               // 持ち越す知らせの上限
 // 削除の件数は画面にしか残らない。再読み込みを促す文言より前に出す。
@@ -143,7 +147,7 @@ let participantUnknown = 0;     // 送ったが結果を確認できなかった
 let recordsInFlight = 0;        // 走っている記録操作(書き出し・削除)の数
 let recordsOwner = 0;           // その操作の通し番号(後始末の横取りを防ぐ)
 const CURRENT_READING_KEY = "okulab-time/reading-current";
-const readingSet = READ_KEY.endsWith("/long") ? "long" : "short";
+
 const currentPassages = new Map();
 let passageScroll = 0;
 let passageChanged = false;
@@ -173,6 +177,10 @@ main();
 
 function main() {
   el.version.textContent = APP_VERSION;
+  // localStorage取得自体が拒否される環境でも入力と起動は続ける。
+  let labelStorage;
+  try { labelStorage = window.localStorage; } catch { labelStorage = { getItem() { throw Error(); }, setItem() { throw Error(); } }; }
+  bindFreeLabel(el.inputLabel, $("free-label-hint"), labelStorage, window, document);
   initCatalog();
   initSequence();
   initPatterns();
@@ -328,6 +336,7 @@ function setParticipant(on) {
   showRoomScreen();
 
   // 文字サイズの調整は、画面が表示されてからでないと寸法を測れない
+  if (state.role === "end") ensurePassage();
   if (state.participant) {
     ensurePassage();
     fitPassage();
@@ -419,13 +428,17 @@ function nextPassage() {
   const roomId = state.roomId;
   if (!roomId) return;
 
-  const { passage, shown } = selectReading(READING_PASSAGES, readShown(roomId));
-  writeShown(roomId, shown);
+  const result = readingSelection === "alternate"
+    ? { passage: READING_PASSAGES[(READING_PASSAGES.findIndex(p => p.id === currentPassages.get(roomId)) + 1) % READING_PASSAGES.length] }
+    : selectReading(READING_PASSAGES, readShown(roomId));
+  const { passage, shown } = result;
+  if (shown) writeShown(roomId, shown);
   currentPassages.set(roomId, passage.id);
   try {
     const raw = JSON.parse(localStorage.getItem(CURRENT_READING_KEY) ?? "{}");
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
       const previous = raw[readingSet];
+      if (previous !== undefined && (previous === null || typeof previous !== "object" || Array.isArray(previous))) throw new Error("保存された文章の区分を読めません。");
       raw[readingSet] = {
         ...(previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {}),
         [roomId]: passage.id,
@@ -437,11 +450,8 @@ function nextPassage() {
 }
 
 function displayPassage(passage) {
-  el.passageText.replaceChildren(...passage.paragraphs.map((text) => {
-    const p = document.createElement("p");
-    p.textContent = text;
-    return p;
-  }));
+  el.passageText.replaceChildren(...passageElements(passage, document));
+  $("current-passage").textContent = "現在の文章: " + (passage.title ?? `旧短文 ${Number(passage.id) + 1}`);
   passageScroll = 0;
   passageChanged = true;
 }
@@ -484,43 +494,9 @@ async function onDetect(press) {
   await onEnd(press);
 }
 
-/**
- * ボタンを押した「瞬間」の状態を pointerdown で切り出し、click で確定する。
- * click まで待つと指を離すまでの時間が誤差として乗るため。
- *
- * タッチ入力ではポインタが pointerup 直後に消滅し、仕様上かならず
- * pointerleave が発火する。そのため pointerleave での取り消しは
- * マウス操作(要素外へドラッグして離す)に限定する。
- */
+/** 最初の接触時刻を保持し、有効なpointerupで一度だけ確定する。 */
 function bindPressButton(button, handler) {
-  let press = null;
-
-  button.addEventListener(
-    "pointerdown",
-    (event) => {
-      // 2 本目以降の指で押下時刻が上書きされないようにする
-      if (!event.isPrimary) return;
-      // disabled のボタンにはそもそもイベントが届かないため、
-      // ここに来た時点で押せる状態にある
-      press = clock ? clock.snapshot() : null;
-    },
-    { passive: true }
-  );
-
-  button.addEventListener("pointercancel", () => { press = null; }, { passive: true });
-  button.addEventListener("pointerleave", (event) => {
-    if (event.pointerType === "mouse") press = null;
-  }, { passive: true });
-
-  button.addEventListener("click", () => {
-    // 鮮度の判定には、OS の時刻補正で飛ばない performance.now() を使う
-    const fresh = press && performance.now() - press.perfAt < PRESS_FRESH_MS;
-    // キーボード操作など pointerdown を伴わない経路ではここで取り直す
-    const snapshot = fresh ? press : (clock ? clock.snapshot() : null);
-    press = null;
-    if (!snapshot) return;
-    handler(snapshot);
-  });
+  bindTimedPress(button, handler, () => clock ? clock.snapshot() : null, PRESS_FRESH_MS);
 }
 
 function updateJoinMethod() {
@@ -630,6 +606,7 @@ function enterRoom(roomId, role, participant = false) {
   showRoomScreen();
   passageScroll = 0;
   passageChanged = false;
+  if (state.role === "end") ensurePassage();
   if (state.participant) {
     ensurePassage();
     fitPassage();
@@ -700,8 +677,8 @@ function setConnError(key, message) {
 //  エラー時の再接続だけでは復旧できないため、進行中フラグを定期的に
 //  サーバーへ直接問い合わせ、食い違っていれば購読ごと張り直す。
 
-const onResume = () => reconcile("復帰");
-const onVisible = () => { if (document.visibilityState === "visible") reconcile("復帰"); };
+const onResume = () => { reconcile("復帰"); if (sequenceRun?.pending) watchSequence(); };
+const onVisible = () => { if (document.visibilityState === "visible") onResume(); };
 
 function startWatchdog() {
   stopWatchdog();
@@ -856,6 +833,7 @@ function onLeave() {
 
 /** ルームに紐づく購読・タイマー・送信中の操作をすべて無効化する */
 function teardownRoom() {
+  $("current-passage").textContent = "";
   $("room-id-full").value = "";
   $("room-id-panel").open = false;
   $("room-id-copy-status").textContent = "";
@@ -2600,9 +2578,20 @@ function watchSequence() {
   const pending = sequenceRun?.pending, room = state.roomId;
   if (!pending || state.role !== "start") return;
   let observed = pending.observed === true;
-  let updates = Promise.resolve();
-  stopSequence = subscribeRandomSession(db, room, pending.id, (record) => {
-    updates = updates.then(async () => {
+  stopSequence = watchSequenceRecord({
+    subscribe: (onData, onError) => subscribeRandomSession(db, room, pending.id, onData, onError),
+    fetch: () => fetchSequenceRecordFromServer(db, room, pending.id),
+    reload: async () => {
+      if (state.roomId !== room || sequenceRun?.pending?.id !== pending.id) return;
+      const raw = localStorage.getItem(SEQUENCE_KEY + room);
+      const latest = validateSequenceRun(JSON.parse(raw));
+      if (latest.id !== sequenceRun.id) throw new Error("別の実行に変更されています。");
+      sequenceSnapshot = raw; sequenceRun = latest; sequenceMode = latest.mode;
+      if (latest.pending?.id !== pending.id) watchSequence();
+      renderControls();
+    },
+    report: message => { randomMessage(message); renderControls(); },
+    apply: async record => {
       if (state.roomId !== room || sequenceRun?.pending?.id !== pending.id) return;
       if (record && (record.mode !== "sequence" || record.sequenceRunId !== sequenceRun.id)) {
         throw new Error("受信した記録の実行識別子が一致しません。");
@@ -2610,12 +2599,16 @@ function watchSequence() {
       sequenceRecord = record;
       if (record) {
         observed = true;
-        if (!sequenceRun.pending.observed) await mutateSequence((run) => { run.pending.observed = true; });
-        if (record.status === "aborted" || record.sequenceOutcome) await settleSequence(record);
-      } else if (observed) await settleSequence({ id: pending.id, sequenceRunId: pending.payload.sequenceRunId, deleted: true });
+        if (!sequenceRun.pending.observed) await mutateSequence(run => { run.pending.observed = true; });
+        if (record.status === "aborted" || record.sequenceOutcome) {
+          if (!await settleSequence(record)) throw new Error("確定した判定を端末に保存できません。");
+        }
+      } else if (observed) {
+        if (!await settleSequence({ id: pending.id, sequenceRunId: pending.payload.sequenceRunId, deleted: true })) throw new Error("消失した記録の決着を保存できません。");
+      }
       renderControls();
-    }).catch((err) => { randomMessage(err.message); renderControls(); });
-  }, (err) => randomMessage(describeError(err) + " 保存した開始操作を再送・確認してください。"));
+    },
+  });
 }
 async function settleSequence(record, missingReceipt = false) {
   try {
@@ -2708,7 +2701,8 @@ function renderRandom() {
     if (hidden && !confirmation.hidden) confirmation.focus();
     $("random-yes").disabled = randomWorking || state.busy;
     $("random-no").disabled = randomWorking || state.busy;
-    $("random-retry").hidden = !pending || Boolean(sequenceRecord);
+    $("random-retry").hidden = !pending;
+    $("random-retry").textContent = sequenceRecord ? "状態を再確認" : "保存した開始操作を再送・確認";
     $("random-retry").disabled = randomWorking || state.busy;
   }
   renderSequenceNext();
@@ -2805,8 +2799,18 @@ function initSequence() {
   $("random-retry").addEventListener("click", () => randomAction(async () => {
     const pending = sequenceRun?.pending;
     if (!pending) return;
-    watchSequence();
-    await startMeasurement(pending.payload, pending);
+    if (sequenceRecord) {
+      const room = state.roomId;
+      const record = await fetchSequenceRecordFromServer(db, room, pending.id);
+      if (room !== state.roomId || sequenceRun?.pending?.id !== pending.id) return;
+      sequenceSnapshot = localStorage.getItem(SEQUENCE_KEY + room);
+      sequenceRun = validateSequenceRun(JSON.parse(sequenceSnapshot));
+      if (record?.sequenceOutcome || record?.status === "aborted") await settleSequence(record);
+      else watchSequence();
+    } else {
+      watchSequence();
+      await startMeasurement(pending.payload, pending);
+    }
   }));
   window.addEventListener("storage", (event) => {
     try {

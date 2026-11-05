@@ -8,11 +8,14 @@ if (!output) throw new Error('Run through devflow-browser');
 module.exports = defineConfig({
   testDir: __dirname,
   testMatch: '**/*.spec.cjs',
-  timeout: 180000, workers: 2, retries: 0, forbidOnly: true,
+  // ルビ付き全文のtraceを複数ページで採るため、検証環境のメモリ逼迫を避けて直列実行する。
+  timeout: 180000, workers: 1, retries: 0, forbidOnly: true,
   outputDir: path.join(output, 'test-results'),
   reporter: [['line'], ['json', { outputFile: path.join(output, 'results.json') }],
              ['html', { outputFolder: path.join(output, 'html'), open: 'never' }]],
-  use: { headless: true, trace: 'on', screenshot: 'on', video: 'retain-on-failure',
+  use: { headless: true, trace: 'on', screenshot: 'on',
+         // 複数タブの録画負荷を避ける。失敗解析には常時traceとスクリーンショットを保存する。
+         video: 'off',
          serviceWorkers: 'block' },
   projects: [
     { name: 'iphone-portrait', use: { ...devices['iPhone 13'], browserName: 'webkit' } },

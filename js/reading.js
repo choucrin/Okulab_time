@@ -1,11 +1,12 @@
+import { AOZORA_PASSAGES } from './passages-aozora.js';
 import { READING_SET } from './reading-config.js';
 import { PASSAGES } from './passages.js';
 import { LONG_PASSAGES } from './passages-long.js';
 
 export function readingDataset(value = READING_SET) {
-  return value === 'short'
-    ? { key: 'okulab-time/passages', passages: PASSAGES.map((text, id) => ({ id, paragraphs: [text] })) }
-    : { key: 'okulab-time/passages/long', passages: LONG_PASSAGES };
+  if (value === 'short') return { set: 'short', selection: 'random', key: 'okulab-time/passages', passages: PASSAGES.map((text, id) => ({ id, paragraphs: [text] })) };
+  if (value === 'long') return { set: 'long', selection: 'random', key: 'okulab-time/passages/long', passages: LONG_PASSAGES };
+  return { set: 'aozora', selection: 'alternate', key: 'okulab-time/passages/aozora', passages: AOZORA_PASSAGES };
 }
 
 export function validShown(values, passages) {

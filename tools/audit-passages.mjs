@@ -1,3 +1,4 @@
+import { auditAozora } from './aozora-audit.mjs';
 // 本文編集の補助。共通表現の多さだけでは内容の独立性を判定できない。
 // 終了0は自動検査の合格であり、F-12-2の内容レビューの代替ではない。
 import { LONG_PASSAGES } from '../js/passages-long.js';
@@ -40,6 +41,7 @@ for (const [fragment, passages] of repeated) {
 }
 const invalidLengths = lengths.filter(p => p.characters < p.min || p.characters > p.max);
 console.log(JSON.stringify({
+  aozora: auditAozora(),
   note: '24文字以上の表現を3題以上で共有する段落を抽出。内容レビューは別途必要。',
   lengths,
   invalidLengthIds: invalidLengths.map(p => p.id),

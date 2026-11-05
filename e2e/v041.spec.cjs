@@ -507,3 +507,8 @@ test('A-65: 320/375/390px と各端末条件で参加画面・実験者用画面
     await page.click('#btn-experimenter');
   }
 });
+
+// F-16: 旧長文データと切戻し経路の回帰検証を維持する。
+test.beforeEach(async ({ context }) => {
+  await context.route('**/js/reading-config.js', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const READING_SET="long";' }));
+});

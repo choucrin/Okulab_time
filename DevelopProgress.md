@@ -1170,3 +1170,106 @@ v.05.0の実装を完了しました。長文10題の加筆・通読、順序反
 - 未検証: ブラウザ確認はUbuntu上の端末エミュレーションとFirebaseスタブによります。iPhone・iPad・Windows実機、OS連携は未検証です。
 - 未検証: 実Firebaseの2端末同期とFirestoreルールエンジンの実評価は未実施です。
 - 未検証: 配信・マージは未実施です。別の承認付きセッションでルールを先行配信・反映確認してからユーザがマージし、その後after-merge確認を行います。
+
+## 2026-11-05 / Development / e7c2aed2-46b4-4ee8-abad-2e6ccacb9190 / 作業中
+
+- 担当工程: Development。HEAD/対象候補は`6fe36d2358d95bfed5dd199f8cf576b2f59736ec`、開始コミットは`c4a0bd327deff01cf73d7be827830a58e18df35c`。変更はこのworktreeの未コミット差分。コミットと次工程の起動・送達は管理側の担当であり、未実施。
+- RSD F-16に沿ってアプリと指定版数表記をv.05.1へ更新。TASKS.md・RSD.md・Review.md・Test.md、旧長短文ファイル、Firestoreルール、CI/配信設定は変更していない。
+- 原典再取得: `tools/aozora/sources.json`に公式本文/図書カードURL・取得UTC日時・バイト数・SHA-256・Shift_JIS・変換版を保存。人間椅子47,306バイト、`754a6926e37964886be4dab8e5d6e489017cd09d8c651d00167abb4d0edc1020`。目羅博士47,977バイト、`2b0ae2da90dbfb456c3ed1b6c403aa162cc81a6ee2ab7d9d4962b602b07cb43f`。Design調査と一致。原典はHTMLとして解釈されない`.sjis`でそのまま保存。
+- 2026-11-05、青空文庫の取り扱い規準 https://www.aozora.gr.jp/guide/kijyunn.html の「著作権の切れている作品」を確認。複製・再配布・形式変換、ルビ/外字/傍点等の注記形式変更が許可されている。被験者用画面へ出典等は追加していない。書誌・入力校正情報は保存原典に残し、本文データへ混入させない。
+- 外字の根拠: Project X0213のJIS X 0213:2004対Unicode対応表 https://x0213.org/codetable/jisx0213-2004-std.txt の`3-7E35 U+9AB6`を確認。面1、区94=0x7e−0x20、点21=0x35−0x20なので1-94-21は「骶」。原典alt・置換文字・位置・対応表をsources.jsonへ記録。外字画像・外部CSS/JSは取得していない。
+- `node tools/aozora-convert.mjs`で保存原典を決定的変換。許可外構文・属性・復号不正は失敗する。`js/passages-aozora.js`は自動生成。本文・ルビ・見出し・傍点・注記は`js/reading-render.js`でDOM API/textContentだけで表示する。
+- `node tools/audit-passages.mjs`は原典バイト列と生成物、独立した原典直接抽出による本文とルビ列、各要素数、行・空行数、作品外情報の不在、先頭/中間/末尾を照合。人間椅子14,856字/ルビ239/見出し0/空行8/外字1/注記1、目羅博士15,358字/ルビ215/見出し5/空行9/傍点2。rt/rpを文字数に含めない。旧長文の分量・共有表現監査も維持。
+- 再取得・照合手順: `curl --fail --location https://www.aozora.gr.jp/cards/001779/files/56648_58207.html --output /tmp/56648_58207.sjis`および`curl --fail --location https://www.aozora.gr.jp/cards/001779/files/57521_69565.html --output /tmp/57521_69565.sjis`、`sha256sum /tmp/56648_58207.sjis /tmp/57521_69565.sjis`で上記ハッシュと照合する。一致しない再取得ファイルで保存原典を自動上書きせず版の差異を確認する。オフラインの通常検証は`node tools/aozora-convert.mjs`→`node tools/audit-passages.mjs`。
+- `READING_SET`はaozora/long/short。不正値はaozoraへフォールバック。通常の初回は人間椅子、明示変更ごとに交互切替。現在の文章を終了担当の入室時に確定し、タイトルと本文は同じpassageから描画する。旧データ本文と既出キーは変更せず、新しい作品は旧既出管理を使わない。切戻し手順はREADMEへ記載。
+
+### 調査・改修の根拠
+
+- F-16-3 H1/H2: 変更前の実コードに非primary指の合成pointerdown/up（clickなし）を送ると計測が待機中のままになることをChromiumで再現。コマンド`DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-v051-before devflow-browser e2e/v051-development.spec.cjs --project=desktop-chromium`、失敗1件。成果物`/tmp/okulab-v051-before/results.json`・`test-results/`（trace・画面）。修正前の再現失敗は期待した不具合検出で、最終チェックの合否とは分ける。
+- `js/press-button.js`は最初のpointerdown snapshotを保持し、同じpointerIdのボタン内pointerupで一度だけ確定。10px超移動・cancel・マウスleave・期限切れ・disabledを破棄し、後続clickを抑止。非primary指でもボタン上から始まる接触を扱い、他の指で時刻を上書きしない。キーボードはclick時にsnapshot取得。ページ全体のtouch-action/ズーム設定は変更しない。マウスを外で離した後の次クリックが無効化されないことも単体で検証。
+- 修正後、非primary指/click欠落の合成イベントはWebKit5条件とChromiumの計6件成功（`/tmp/okulab-v051-press`）。この合成イベントはOSの慣性スクロール再現と同一ではない。静止・スクロール通知中/直後・微小移動・パン・cancel・マウス・キーボード等の追加検証は`e2e/v051-development.spec.cjs`。実際のOS慣性中にイベント自体が届かない事象は確認しておらず、OS制約が原因だと断定しない。
+- F-16-4 H1: 固定候補の変更前app.jsをローカルで配信し、終了→開始側確認→判定→サーバー確定通知の後、pendingを解消するlocalStorage保存を1度だけ失敗させると、5秒後もpendingが残ることを再現。`V051_BASELINE=1 DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-v051-settle-before devflow-browser e2e/v051-development.spec.cjs --project=desktop-chromium --grep 決着調査`（失敗1件）。成果物`/tmp/okulab-v051-settle-before/results.json`と`test-results/`。ユーザの実環境の唯一の原因と断定せず、再現できた経路として扱う。
+- `js/sequence-watch.js`で確定通知の直列処理・一時決着失敗時の保存再読込/最大5回の間隔付き再試行を追加。45秒ごとのサーバー単一記録確認と再購読、8秒タイムアウト、通信失敗8回上限、停止後通知の破棄を追加。復帰でも購読を再作成。「状態を再確認」はサーバー取得による異常時復旧。初回の記録可否確認とサーバー確定値からだけ進める条件、pending.id/実行IDによる冪等性を維持し、既存記録・開始受領記録を削除しない。
+- 任意ラベルは`okulab-time/free-label`へ`{v:1,value}`でinputごと保存。空欄・未計測入力も保持。起動や描画で書き戻さない。入力中は他タブの値を反映せず、保存失敗を欄付近へ表示。不正保存値を入力まで上書きしない。
+
+### 検査更新の対応表と途中結果
+
+| 旧検査 | v.05.1での対応（検査を省略しない） |
+| --- | --- |
+| long/shortだけの設定検査 | aozora既定/不正値フォールバック/旧長短文の明示指定/ハッシュ保全を検証 |
+| displayPassage内の`p.textContent`固定検査 | 許可型DOMレンダラーと旧段落の文字列一致へ変更 |
+| 字下げCSSが1種類だけ | 原典のindent:falseだけ0、それ以外は従来の1emを確認 |
+| 旧長文E2E | reading/v041/v050を明示的long設定で継続し、短文のルート差替えも維持 |
+| 表示版数v.05.0 | 依頼版数v.05.1に一致することを確認 |
+| 通常の新本文・押下/ラベル/決着 | v051-developmentの開発確認を追加。独立Testの代替ではない |
+
+- 整合性: `node tools/verify.js`、10項目成功（`/tmp/okulab-v051-verify.log`）。単体: `node --test`、140件成功（`/tmp/okulab-v051-unit.log`）。監査: `node tools/audit-passages.mjs`、終了0（`/tmp/okulab-v051-audit.log`）。新規モジュールと変換/照合道具を構文検査対象へ追加。
+- 新本文/交互切替/ラベルと押下のChromium開発確認3件成功（`/tmp/okulab-v051-new`）。本文末尾の画面を目視し、親文字とルビの区別・末尾到達を確認。
+- 旧E2E初回実行は版数期待値がv.05.0のままだった2件を検出し中断（`/tmp/okulab-v051-all`）。版数期待値を更新した再実行は`DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-v051-final devflow-browser`、ログ`/tmp/okulab-v051-final-browser.log`。開始後に追加した調査ケースを含む新仕様の6条件は`DEVFLOW_BROWSER_OUTPUT=/tmp/okulab-v051-extra devflow-browser e2e/v051-development.spec.cjs`、ログ`/tmp/okulab-v051-extra.log`で別実行中。どちらも完了前であり、成功扱いにしない。
+- 未検証: 独立Review3周とTest、iPhone/iPad/Windows実機・実OSの慣性/ピンチ/外字フォント・実Firebase同期。Ubuntu端末エミュレーションとFirebaseスタブは実機合格ではない。本番への書込み・公開・配信・課金は未実施。
+- 次のDevelopment継続では実行中プロセス/結果を先に確認し、二重起動を避けてE2Eを完了する。途中の修正によって影響するケースは最終コードで再実行し、結果とPR本文案を更新する。必須5checksが完了するまでDevelopment完了としない。指定4文書の結果更新は管理側/各担当へ引き継ぐ。
+- 継続用の実行セッションID: 全体E2Eは`65029`（162件を収集した実行）、追加E2Eは`9004`（最新5ケース×6条件=30件）。いずれも`write_stdin`で状態を確認できる。ログの最終位置は全体9/162・追加8/30、現時点で再実行側に失敗出力なし。プロセス完了・終了コード・results.jsonを確認してから合否を記録すること。最終のマウスleave修正とラベル起動時の保存不可表示も含めて単体140件・整合性10項目・監査・空白検査を再実行し成功。
+- 状態訂正: 全体E2Eセッション`65029`はポーリング時に終了コード143（SIGTERM）で終了していることを確認。162件の完了結果は得られておらず「中断」とする。原因は未確定で、アプリ不具合による失敗とは断定しない。追加セッション`9004`は引き続き実行中。次回は追加結果を先に回収し、全体E2Eをプロジェクト単位等に分けて中断範囲を再実行する。必要なら管理側の通常`devflow-browser`チェックも再実行し、必須E2Eが完了するまで合格としない。
+
+## 2026-11-05 / Development継続 / e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+
+- 再開時、前回の`/tmp/okulab-v051-*`とセッション9004は存在せず、追加E2E結果を回収できなかった。前回の成功記録を取り消すものではないが、成果物が残っていないため今回の最終合否へ流用しない。今回はGit対象外の`.development-checks/v051-resume/`へログ・JSON・trace・スクリーンショットを保存する。
+- 最終コードの確認中に、退出/役割変更時の作品名消去、旧短文の番号表示、未知の本文型(nullを含む)でも後続本文を止めない警告処理を追加。決着再試行で読み直した保存内容が別のpendingまたは決着済みの場合は、古い購読を終了して最新状態の購読へ切り替える。
+- 追加の単体確認は、aozora初期値・交互切替・ルーム別復元・破損保存の保全・旧履歴不変、未知型の警告/読み進め。`node --test`は142件成功、失敗/skip 0。整合性10項目・原典監査・空白検査も終了0。コマンドごとの終了コードは`non-browser-results.json`、各ログも同じ成果物領域に保存。
+- Chromiumの新仕様開発確認5件成功: `DEVFLOW_BROWSER_OUTPUT="$PWD/.development-checks/v051-resume/new-chromium" devflow-browser e2e/v051-development.spec.cjs --project=desktop-chromium`。別途CDPの実タッチ列で読み物をパンし、その直後の停止タップ→終了→本文維持を確認して1件成功（`touch/`、`touch.log`）。WebKitではCDPを使えないためプログラムによるスクロール直後に`touchscreen.tap`を送る条件を追加。実iOS慣性の保証とは区別する。外字「尾骶骨」を表示領域へ移動した画面も新本文E2Eで保存する。
+- 全体再実行は同時に別のブラウザ確認を起動した影響もあり、RAM約2.8GiB・swap約1GiBの環境でswapが約1GiBまで使用された。iPhone縦相当の順序反復ケースで2回目のタップ処理が約18.7秒となり、既存の押下有効期限15秒を超えて開始されなかった。`.development-checks/v051-resume/browser/`に失敗traceを保存し、全体実行はCtrl-Cで中断（終了130）。
+- 同じ失敗ケースを単独で再実行すると成功した: `DEVFLOW_BROWSER_OUTPUT="$PWD/.development-checks/v051-resume/diagnose-tap" devflow-browser e2e/okulab-time.spec.cjs --project=iphone-portrait --grep '順序反復方式の開始' --workers=1`、1件成功、38.1秒。環境負荷の影響が強く疑われるが、最終全件結果を得るまで回帰なしとは判定しない。押下有効期限・期待値・テスト対象は緩和していない。
+- `e2e/playwright.config.cjs`の既定worker数を2→1へ変更し、1実行内で複数の大きなDOM/traceを同時処理しない。タイムアウト・リトライ・skipは変更しない。プロジェクト別に全ケースを実行して結果を保存中（各30件、全6条件180件予定）。後続Testはこの設定変更も含めて独立検証し、結果をTest.mdへ記録すること。
+- 旧長文の字下げE2EがChromiumで失敗した。原因は旧paragraphsにも新規Inline用spanを挟んでp.firstChildがテキストノードでなくなったこと。旧データは従来どおりp.textContentへ直接設定する方式に戻し、元の検査を変更せず再実行して成功（`indent-fixed/`、`indent-fixed.log`、1件成功/終了0）。Chromium全30件の初回はこの1件だけ失敗・29件成功（`desktop-chromium/`）、修正後の再確認と対応づける。本文の文字列・CSS字下げは緩和していない。
+- 最終実装のアプリ/設定/テスト/変換道具等のSHA-256一覧を`candidate-sha256.json`へ保存した（追記する開発記録とPR本文案は除外）。この後のアプリ実装変更は行わず、ブラウザ検証と記録更新を続ける。現在のworktreeはdetached HEADで候補6fe36d2のまま。ブランチ操作・コミットは行っていない。
+- 型不正の保存区分について`aozora:null`も上書きしないよう補足し、破損JSON・配列・null・文字列区分を保存せずメモリ上で切り替える単体確認を追加した。追加後も142件/整合性10項目成功。`candidate-sha256.json`をこの最終差分へ更新し、以後の照合で変更なしを確認中。
+- iPhone縦相当の全件は29成功・旧段落DOMの字下げ1件失敗（`iphone-portrait/`）。修正後、同じ字下げと青空文庫表示/外字画面を`devflow-browser --project=iphone-portrait --grep '段落の1行目|青空文庫'`で再実行し、2件成功（`portrait-fixed/`）。Chromiumの修正後1件と合わせ、最終のケース別結果はiPhone縦/Chromiumが各30成功・未解決0。
+- ケース集計は`aggregate.py`が`devflow-browser --list --reporter=json`による現行180ケースの一覧と、各プロジェクトのJSON結果を照合する。`test-list.json`は一覧取得のみ（未実行表記）であり合格根拠に使わない。実行済みの各ケースは最新時刻の実行結果を採用し、未完了・中断・スキップを成功扱いにしない。`check-summary.json`へ未完了と指摘残存の有無、候補SHA-256一致を保存する。
+- 継続中のプロセスは`73403`（iphone-landscape→ipad-portrait）、`63725`（portrait-fixed完了→ipad-landscape→iphone-320）。`run-projects.py`がプロジェクトごとにログ・終了コードJSONを保存する。前回と異なり成果物はworktree内で保持する。終了前の未完了プロジェクトは合格としない。
+- WebKitを別プロジェクトとして同時実行した際にもRAM約2.8GiBとswap約1GiBが再び逼迫した。iPad横相当の別タブ逆回答後の再開始ケースでclick全体91.5秒（クリック実行部分約81.5秒）をtraceで確認し、開始待ちの失敗を検出。原因の断定/成功扱いはせず、iPad横実行をCtrl-Cで中断して単独再検証へ戻す（セッション63725は終了130、iphone-320未開始）。現在ブラウザを動かすのは73403の1条件だけ。
+- 共通雛形と同じworkers:1を維持し、さらに複数タブの動画録画負荷を減らすためvideoをoffへ変更した。検証対象・端末条件・ブラウザ・タイムアウト・期待値・リトライ0は変えず、常時traceとスクリーンショット/JSON/HTMLレポートを保持する。動画は受け入れ条件の必須成果物ではない（RSD 7-7・共通README）。このテスト設定変更も次のReview対象に含める。候補ハッシュのテスト設定分だけ更新した。
+- iPhone横相当は全30件成功/終了0（`iphone-landscape/`、`iphone-landscape.log`、`iphone-landscape-exit.json`）。集計はiPhone縦・横・Chromiumの計90ケース成功、未解決0、残る3条件90ケースは未完了。動画offでのiPad縦相当を単独実行中。
+- 中断したiPad横の失敗trace・途中成果物とログは、再実行で失わないよう`ipad-landscape-interrupted/`と`ipad-landscape-interrupted.log`へ保全した。後の`ipad-landscape/`は単独再実行の結果専用とする。
+- 原典のバイト保持をGitの改行変換設定からも保護するため、`.gitattributes`へ`tools/aozora/*.sjis -text`を追加。`git -c core.autocrlf=true hash-object --path=...`と`git hash-object --no-filters ...`が両作品とも一致することを確認した（Gitへオブジェクトを書かない読取操作）。生成JSは`text eol=lf`にして、OSによる改行差で再生成ファイル照合が失敗しないようにした。他ファイルの属性は変更しない。
+- `tools/audit-passages.mjs`は、既存のJSON出力へaozora配列を追加する単一JSON形式に揃えた。旧フィールドを残し、JSON.parseで新2作品の一致・旧長文の範囲外0/共有表現0を確認。ブラウザ/アプリ実装は変えていない。候補ハッシュへこの道具と.gitattributesを反映した。
+- iPad縦相当は30件すべて成功/終了0（`ipad-portrait/`・`ipad-portrait-exit.json`）。iPad横相当の前回失敗した別タブ逆回答→再開始ケースも、動画off/単独実行で成功し、その後の全件確認を継続中。
+- 未追跡ファイルも`git diff --no-index --check /dev/null <原典>`で確認したところ、原典のCRLFに対してCR由来の警告が人間椅子157行・目羅博士250行出た。原典は変えず、原典2ファイルだけの属性に`whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol`を設定し、通常の空白検査を維持したままCRLFを正当な改行として認識させた。変更後は警告0（差分ありの終了1、検査出力なし）。アプリ本体やテストの空白規則は変更せず、原典のSHA-256は引き続き固定値と一致する。
+
+### 実2指入力の追加調査と最終入力補完
+
+- 180ケースの初回確認後、Chromium/CDPの実タッチ列で「1本目を読み物のパン位置に残したまま、2本目を停止ボタンへ追加」を調べた。Pointer Eventsだけを扱う実装ではボタンにpointerdown/upが届かず失敗した（`native-multi-pointer/`、終了1）。合成PointerEventでは再現しない、ブラウザのジェスチャー処理に伴う別経路だった。
+- ボタン限定touch-action:noneの実験でもPointer Eventsは戻らず、touchstart/touchendだけが届いた（`native-touch-none-experiment/`）。スクロールさせない対照条件では非primaryのpointerdownが届き、その後pointercancelになった（`native-static-contact-control/`）。実験の失敗は調査結果として残し、通常チェックの成功へ算入しない。実験CSSはアプリへ適用していない。
+- `bindTimedPress`へ、Pointer Eventsが配信されない入力経路のTouch Events補完を追加した。最初に届く接触開始で`clock.snapshot()`を保持する。通常のpointerdownが受信済みならtouchstartで時刻を取り直さず、pointerdownがない経路だけ最初のtouchstartを使う。pointerup/touchend/click・通信完了の時刻へ採時を遅らせない。キーボード等と同様、pointerdownを伴わない入力経路として最初の入力で採時する。計測記録形式は変えない。
+- Touch Eventsはボタンだけにpassiveで登録。Pointer/Touch両方が届く場合も1接触1確定とし、touchcancel/pointercancel、10px超の移動（移動イベントと終了位置の両方で判定）、ボタン外・disabled・期限切れを除外する。pointercancelがtouchstartより先の場合も同じ接触を復活させない。ページ全体のスクロール/ズームやアプリのtouch-actionは変更していない。
+- 補完後、通常CSSのまま実2指入力→停止→記録1件→本文/スクロール維持が成功した（`native-multi-pointer-fixed/`、さらに最終実装の`native-multi-pointer-final/`で再実行して1件成功/終了0）。時刻の保持、Pointer/Touchの順序差、複数指、マウスとの混在、二重click、各キャンセル/移動の除外を単体へ追加し、全144件成功。これはUbuntu Chromiumの実タッチ注入であり、iOS/iPadOS実機合格ではない。
+- 入力処理を追加修正したため、以前の180ケース合格だけで完了せず、最終実装に対して通常の`devflow-browser`全180ケースを再実行している。成果物は`.development-checks/v051-final/`（`browser.log`・`browser/results.json`・`browser/html/index.html`・`browser/test-results/`）。実行セッションIDは`62500`。ブラウザ実行は1条件ずつ、workers:1/video:off/trace:on/screenshot:on、タイムアウト・リトライ0・期待値は据え置き。
+- 最終候補のソース指紋は`v051-final/candidate-sha256.json`。アプリの入力実装を固定した後、READMEの採時説明と監査の外字alt/面区点/Unicode対応検査だけを補足して指紋を更新した。アプリ/データの動作変更はしていない。整合性・単体・監査・空白検査は最終候補でもすべて終了0（`non-browser-results.json`）。全E2E完了後、これらのチェックを改めてまとめて確認する。
+
+### 最終E2Eの中断回収と再開
+
+- セッション62500は再開時に存在せず、OSプロセスも残っていなかった。ログは173/180で止まり、終了コード・最終JSONがないため合格としない。途中成果物を`v051-final/browser-interrupted-at-173/`と同名ログへ保全した。
+- 同一の最終候補に対し、`DEVFLOW_BROWSER_OUTPUT="$PWD/.development-checks/v051-final/browser" devflow-browser`を再実行。終了コードを`browser-exit.json`へ必ず保存するラッパーを使用し、セッション45655で実行中。既存の要件・期待値・180ケース・6条件は変更していない。
+
+### Development完了・管理側への引き継ぎ記録（v.05.1）
+
+- 引き継ぎID: `e7c2aed2-46b4-4ee8-abad-2e6ccacb9190-develop-v051-final-01`。案件: Okulab_time、実行ID: `e7c2aed2-46b4-4ee8-abad-2e6ccacb9190`、現在工程: Development、次の担当: 管理側が起動する別セッションのCodex Review（3周）、その後Claude Code Test。
+- 対象HEADは`6fe36d2358d95bfed5dd199f8cf576b2f59736ec`（detached）。開始コミットは`c4a0bd327deff01cf73d7be827830a58e18df35c`。今回のv.05.1実装はこのworktreeの未コミット差分であり、HEADを実装済みコミットと扱わない。管理側が差分をコミットして新しい候補IDを確定し、その候補でReview/Testを進める。次担当への送達・作業開始は本セッションでは行っていない。
+- 最終必須チェックはすべて終了0。`node tools/verify.js`は10項目成功、`node --test`は144件成功（失敗・中断・スキップ0）、`node tools/audit-passages.mjs`は原典2作品と旧本文の監査成功、`git diff --check`は出力なし。
+- 最終E2Eコマンド: `DEVFLOW_BROWSER_OUTPUT="$PWD/.development-checks/v051-final/browser" devflow-browser`。セッション45655の実際の終了0を回収。180件成功、失敗・スキップ・flaky 0、6条件それぞれ30件成功。所要4243.083秒（約70.7分）。開始UTC `2026-11-04T23:23:13.866Z`。今回の単一全件実行を最終合格根拠とし、以前の中断や診断用失敗を合格へ混ぜていない。
+- 最終成果物: `.development-checks/v051-final/browser-exit.json`（CLI終了）、`browser.log`、`browser/results.json`、`browser/html/index.html`、`browser/test-results/`（trace・スクリーンショット）、`non-browser-results.json`、`verify.log`、`unit.log`、`audit.json`、`diff.log`。`verify-result.py`で全ケース・6条件・各終了コード・ソース指紋を照合し、`check-summary.json`の`all_required_passed:true`を確認した。
+- `candidate-sha256.json`と検証後のコード/データ/設定が一致し、変更0。最終記録を追記する本書とPRDescription.mdはソース指紋の対象外。指定4文書（TASKS/RSD/Review/Test）、Firestoreルール、.github、旧長文/旧短文に差分なし。旧本文2ファイルとルールは開始コミットの生バイト列とも一致した。
+- 原典監査: 人間椅子14856字・ルビ239件、目羅博士15358字・ルビ215件。rt/rpを本文文字数に含めない。原典SHA-256・生成物再現・ルビ列・本文・各構造数・作品外情報除外・外字対応検査に成功。旧本文の保存済みSHA-256も一致した。表示の目視確認は先行調査のデスクトップ/縦画面相当スクリーンショットで実施済み（`v051-resume/`）。
+- Ubuntu上のWebKit/Chromium端末エミュレーションとFirebase SDKスタブで確認。本番サービスへの書き込みなし。iPhone・iPad・Windows実機、実OSの慣性スクロール/ピンチ/フォント/復帰、実Firebase同期は未検証であり実機合格としない。必須実機確認待ちではなく、今回PR前には任意の範囲として後続へ明記する。
+- 独立Review3周・Test、統合・PR作成・マージ・公開・配信とafter-merge実配信状態確認は後続。Test.mdはDevelopmentの編集禁止を守り変更せず、Test担当が自身の実施内容を追記する。追加の配信/設定が必要なら別セッションで具体案とユーザの明示承認が必要。Gitのcommit/checkout/reset/merge/push、別AI CLI起動、公開・配信・課金は実施していない。
+
+<!-- devflow:e7c2aed2-46b4-4ee8-abad-2e6ccacb9190:develop:1:6fe36d2358d95bfed5dd199f8cf576b2f59736ec -->
+
+
+## 2026-11-05T00:34:59.500841+00:00 / develop / 周回1
+実行ID: e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+対象コミット: 6fe36d2358d95bfed5dd199f8cf576b2f59736ec
+
+v.05.1の実装とDevelopProgress.md更新を完了しました。必須5チェックはすべて成功（整合性10項目、単体144件、E2E180件）。検証対象と提出コードの一致、指定4文書の変更なしを確認済みです。成果物は.development-checks/v051-final/に保存しました。
+- 未検証: Ubuntu上の端末エミュレーションで確認。iPhone・iPad・Windows実機、実OS固有の操作、実Firebase同期は未検証です。
+- 未検証: 独立Review3周・Testは後続工程です。
+- 未検証: コミット・PR作成・マージ・公開・配信・after-merge確認は未実施です。

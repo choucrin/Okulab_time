@@ -441,3 +441,10 @@ export function subscribeRandomSession(db, roomId, id, onData, onError) {
     }
   }, onError);
 }
+
+/** キャッシュでなくサーバーで確定した単一記録だけを返す。 */
+export async function fetchSequenceRecordFromServer(db, roomId, id) {
+  const snap = await getDocFromServer(sessionRef(db, roomId, id));
+  if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) throw new Error("記録のサーバー確定を確認できません。");
+  return snap.exists() ? { ...snap.data(), id: snap.id } : null;
+}
