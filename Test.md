@@ -1328,3 +1328,56 @@ A-68〜A-83 の対応は周回1(2026-10-28)の表と同じテストで再確認�
 - 未検証: 送信中（state.sending）に「文章を変更」が無効になることは、E2Eで直接再現していません。計測中の無効化で確認しています。
 - 未検証: GitHub Pagesへの配信とafter-mergeでの確認は、承認付きの別工程のため実施していません。
 - 未検証: Testでe2e/v051.spec.cjsを追加したため、この差分を含む候補でReview 3周とTestの再実施が必要です。
+
+## 2026-11-05 / test / 周回2(v.05.1・e2e/v051.spec.cjs 追加後の Review 3周を経た再テスト)
+
+- 実行ID: e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+- 対象コミット: d58c07f3f35be904e04521c20edaf765c64c3ad4(開始コミット c4a0bd327deff01cf73d7be827830a58e18df35c)。Review 3周(2905ffd・4c7984e・dcf06d8 対象)完了、新規の重要項目・指摘項目0件
+- 前回 Test(7b87cbd + `e2e/v051.spec.cjs` 追加)からの差分: `git diff --stat 7b87cbd d58c07f` は Review.md・Test.md・`e2e/v051.spec.cjs` のみ。アプリ本体・既存テスト・設定・スタブは前回 Test 時と同一
+- 環境: 前回と同じ(WSL2 Ubuntu、Node.js v24、Playwright 1.63.0、WebKit 26.6 / Chromium headless shell、Firebase は `e2e/stubs` のスタブ。本番接続・書き込みなし)
+- 今回はテストコードを変更していない(前回の方針どおり再実行のみ)。変更は本節の追記だけ
+
+### 実行コマンドと結果
+
+| コマンド | 終了コード | 結果 |
+|---|---|---|
+| `node tools/verify.js` | 0 | 10項目すべて成功(`READING_SET`=aozora、版数 v.05.1、ルール照合 作成28/更新2/meta4)。ログ `/tmp/e7c2-retest-verify.log` |
+| `node --test` | 0 | 144件成功、失敗・スキップ・中断0。ログ `/tmp/e7c2-retest-unit.log` |
+| `node tools/audit-passages.mjs` | 0 | 人間椅子 ルビ239・14,856字、目羅博士 ルビ215・15,358字、2作品とも `matched: true`(SHA-256 一致)、`invalidLengthIds: []`、`repeatedGroupCount: 0`。ログ `/tmp/e7c2-retest-audit.log` |
+| `devflow-browser`(`DEVFLOW_BROWSER_OUTPUT=/tmp/e7c2-retest-browser`) | 0 | 216件すべて成功(6条件×36件)、unexpected・flaky・skip 0、50.9分。成果物 `/tmp/e7c2-retest-browser/results.json`、`html/index.html`、`test-results/`。ログ `/tmp/e7c2-retest-browser.log` |
+| `git diff --check` | 0 | 成功 |
+
+受け入れ条件1〜11との対応は周回1の表から変更なし(同じテストを同じアプリ本体に対して再実行し、すべて成功)。
+
+### 指摘事項
+
+- 重要項目: 0件。指摘項目: 0件。
+- 軽微項目 R1-001(継続・再確認): README.md:496 の切戻し手順は `READING_SET` を `"long"`/`"short"` に変更して `node --test` を実行するが、`test/reading.test.mjs:42` が `READING_SET === 'aozora'` を固定で検査するため失敗する。
+- 軽微項目 R3-001(継続・Review 提案): `js/app.js:2928` 付近、管理画面のラベル選択でフォーム全体を再生成し、キーボードフォーカスが失われる。
+
+### 未実施・未検証
+
+- iPhone・iPad・Windows 実機(今回の PR 提出前は任意)。Ubuntu WebKit の端末エミュレーションは実機合格ではない。実 OS の慣性スクロール中の押下、標準フォントでの外字「骶」・傍点・ルビ描画は未確認。
+- 実 Firebase の端末間同期、Firestore ルールの Emulator 実評価(スタブと静的検査のみ)。
+- 送信中(`state.sending`)の「文章を変更」無効化の E2E 直接再現。
+- GitHub Pages 配信・after-merge 確認(承認付きの別工程)。
+
+### 結論
+
+自動検証の範囲で**合格**。必須チェック5件をすべて実行・成功し、受け入れ条件1〜11を満たした。Review・Test の未解決の重要項目・指摘項目は0件(軽微項目2件は残存事項)。今回はテストコード・設定を変更していないため、再レビューは不要(本節の記録追記のみ)。
+
+<!-- devflow:e7c2aed2-46b4-4ee8-abad-2e6ccacb9190:test:3:d58c07f3f35be904e04521c20edaf765c64c3ad4 -->
+
+
+## 2026-11-05T09:53:57.149272+00:00 / test / 周回3
+実行ID: e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+対象コミット: d58c07f3f35be904e04521c20edaf765c64c3ad4
+
+候補d58c07f（v.05.1）を再テストし、自動検証の範囲で合格しました。前回のTest（7b87cbdにe2e/v051.spec.cjsを追加）以降の差分はReview.md・Test.md・v051.spec.cjsだけで、アプリ本体は前回と同じです。今回はテストコードを変更せず、必須チェック5件をすべて実行して成功しました。結果は次のとおりです。verify：10項目すべて成功。単体テスト：144件成功（失敗・skip・中断0）。原典照合：2作品ともSHA-256一致（ルビ239/215件、14,856/15,358字）。E2E：216件成功（6条件、50.9分、unexpected・flaky・skip 0）。git diff --check：成功。受け入れ条件1〜11を満たし、Review・Testで未解決の重要項目・指摘項目は0件です。Test.mdには今回の結果を追記しただけなので（テスト・設定は未変更）、再レビューは不要です。成果物：/tmp/e7c2-retest-browser/（results.json、html/index.html、test-results/）。ログ：/tmp/e7c2-retest-{verify,unit,audit,browser,diff}.log。
+- minor: R1-001（継続・再確認）：README.md:496の切戻し手順はREADING_SETをlong/shortに変更してnode --testを実行しますが、test/reading.test.mjs:42がREADING_SET==='aozora'を固定で検査しているため失敗します。手順と検査を合わせることを推奨します。
+- minor: R3-001（継続・Review提案）：js/app.js:2928付近で、管理画面のラベルを選ぶとフォーム全体が再生成され、キーボードフォーカスが失われます。
+- 未検証: iPhone・iPad・Windowsの実機確認（PR提出前は任意）。今回はUbuntu上のWebKit/Chromiumによる端末エミュレーションで、実機合格ではありません。実OSでの慣性スクロール中の押下と、標準フォントでの外字・傍点・ルビの描画は未確認です。
+- 未検証: 実Firebaseでの端末間同期と、Firestoreルールの実評価（Emulator）は未検証です。E2Eはe2e/stubsのスタブで実行し、ルールは静的検査だけです。
+- 未検証: 送信中（state.sending）に「文章を変更」が無効になることは、E2Eで直接再現していません。
+- 未検証: GitHub Pagesへの配信とafter-merge確認は、承認付きの別工程のため実施していません。
+- 未検証: Test.mdの変更は今回の結果の追記だけです（テストコード・設定は変更していません）。
