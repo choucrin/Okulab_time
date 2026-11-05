@@ -778,3 +778,18 @@ Review第2周（セキュリティとデータ整合性）完了。新規指摘0
 固定候補6a440b2のReview第3周（保守性・回帰・互換性）完了。新規指摘0件、既存の軽微指摘1件を継続。必須5チェック成功（整合性10項目、単体144件、E2E180件）。失敗・skip・flaky各0、候補変更なし。成果物: /tmp/e7c2-review3-state.json、/tmp/e7c2-review3-browser/。管理側によるReview.md記録へ引き継ぎます。工程全体の合格判定ではありません。
 - minor: R1-001（継続）: README.mdの切戻し手順ではREADING_SETをlong/shortへ変更して検査しますが、test/reading.test.mjs:42がaozora固定のため失敗します。手順と検査の整合が必要です。
 - 未検証: Ubuntu上のWebKit/ChromiumとFirebaseスタブによる検証です。iPhone・iPad・Windows実機、OS固有の慣性スクロール・復帰・フォント、実Firebase同期・ルールのEmulator実評価は未検証（今回のPR提出前は任意）。
+
+<!-- devflow:e7c2aed2-46b4-4ee8-abad-2e6ccacb9190:review:1:2905ffdbcb75cc426a32c33a8a0f878a28b0da9d -->
+
+
+## 2026-11-05T07:11:21.055951+00:00 / review / 周回1
+実行ID: e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+対象コミット: 2905ffdbcb75cc426a32c33a8a0f878a28b0da9d
+
+固定候補2905ffdbのReview第1周（要件と正しさ）を完了しました。新規の重要項目・指摘項目はありません。必須5チェックはすべて成功（整合性10項目、単体144件、原典照合、E2E216件、空白検査）。E2Eは52.1分、失敗・skip・flaky各0件です。候補ファイルは変更していません。工程全体の合格判定ではありません。
+- minor: R1-001（継続）: README.md:496の切戻し手順はREADING_SETをlong/shortへ変更してnode --testを実行しますが、test/reading.test.mjs:42がaozora固定を検査するため失敗します。手順と検査を整合させてください。
+- suggestion: R3-001（継続）: 管理画面のラベル選択でフォーム全体が再生成され、キーボードフォーカスが失われます。再描画後のフォーカス維持を推奨します。
+- 未検証: 成果物: /tmp/e7c2-r1-browser/（results.json、html/index.html、test-results/、スクリーンショット）。ログ: /tmp/e7c2-r1-{verify,unit,audit,browser}.log。状態: /tmp/e7c2-r1-review-state.json。Review.mdへの記録は管理側へ引き継ぎます。
+- 未検証: Ubuntu上のWebKit/ChromiumとFirebaseスタブによる検証です。iPhone・iPad・Windows実機、実OSの慣性スクロールとフォント、実Firebase同期、FirestoreルールのEmulator実評価は未検証です。実機確認は今回のPR提出前は任意です。
+- 未検証: 送信中（state.sending）の文章変更禁止は実装を確認しましたが、E2Eでは直接再現していません。
+- 未検証: 公開・配信・after-merge確認は承認付きの別工程です。
