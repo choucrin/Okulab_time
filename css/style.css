@@ -746,3 +746,11 @@ button:focus-visible {
 
 /* 方式欄は既存の一行表示を維持し、条件名の明示改行だけを表示する。 */
 .table-wrap td:nth-child(4) { white-space: pre; }
+
+/* 原典の段落・ルビ・傍点・注記を保つ。本文サイズは既存設定を維持。 */
+.reading__text p.reading-no-indent { text-indent: 0; }
+.reading__text rt { font-size: .5em; }
+.reading-blank { display: block; height: 1.95em; }
+.reading-heading { margin: 1em 0; padding-left: min(8em, 45%); font-size: 1em; font-weight: normal; }
+.reading-sesame { text-emphasis: sesame; -webkit-text-emphasis: sesame; }
+.reading-note { font-size: .8em; color: var(--muted, #666); }

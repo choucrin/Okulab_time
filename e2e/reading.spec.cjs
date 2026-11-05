@@ -41,3 +41,8 @@ test('設定1か所で旧短文へ切替、長文と旧短文の既出キーを�
  const history=await page.evaluate(room=>JSON.parse(localStorage.getItem('okulab-time/passages'))[room],room);
  expect(history).toHaveLength(2);expect(history.every(i=>Number.isInteger(i)&&i>=0&&i<57)).toBe(true);
 });
+
+// F-16: 旧長文データと切戻し経路の回帰検証を維持する。
+test.beforeEach(async ({ context }) => {
+  await context.route('**/js/reading-config.js', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const READING_SET="long";' }));
+});

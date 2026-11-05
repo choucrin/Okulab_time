@@ -1,0 +1,37 @@
+[
+  {
+    "id": "aozora-56648",
+    "title": "人間椅子",
+    "cardUrl": "https://www.aozora.gr.jp/cards/001779/card56648.html",
+    "url": "https://www.aozora.gr.jp/cards/001779/files/56648_58207.html",
+    "file": "56648_58207.sjis",
+    "retrievedAt": "2026-11-04T18:23:58.652183+00:00",
+    "bytes": 47306,
+    "sha256": "754a6926e37964886be4dab8e5d6e489017cd09d8c651d00167abb4d0edc1020",
+    "encoding": "Shift_JIS",
+    "converter": "aozora-convert/1",
+    "gaiji": [
+      {
+        "position": "尾※骨の親文字",
+        "jis": "1-94-21",
+        "alt": "※(「骨＋低のつくり」、第3水準1-94-21)",
+        "replacement": "骶",
+        "unicode": "U+9AB6",
+        "mappingUrl": "https://x0213.org/codetable/jisx0213-2004-std.txt",
+        "mappingEntry": "3-7E35 U+9AB6"
+      }
+    ]
+  },
+  {
+    "id": "aozora-57521",
+    "title": "目羅博士の不思議な犯罪",
+    "cardUrl": "https://www.aozora.gr.jp/cards/001779/card57521.html",
+    "url": "https://www.aozora.gr.jp/cards/001779/files/57521_69565.html",
+    "file": "57521_69565.sjis",
+    "retrievedAt": "2026-11-04T18:23:58.824508+00:00",
+    "bytes": 47977,
+    "sha256": "2b0ae2da90dbfb456c3ed1b6c403aa162cc81a6ee2ab7d9d4962b602b07cb43f",
+    "encoding": "Shift_JIS",
+    "converter": "aozora-convert/1"
+  }
+]

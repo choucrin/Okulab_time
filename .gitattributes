@@ -1,0 +1,5 @@
+# 原典のShift_JIS/CRLFバイト列を保持する。
+tools/aozora/*.sjis -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# 生成物の決定的なファイル照合もOS間で一致させる。
+js/passages-aozora.js text eol=lf

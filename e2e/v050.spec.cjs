@@ -540,3 +540,8 @@ test('E2E-5・6(A-75〜A-79・A-81): 管理ダイアログで編集・並べ替�
   expect(ui.pending()).toBe(0);
   expect(ui.unexpected).toEqual([]);
 });
+
+// F-16: 旧長文データと切戻し経路の回帰検証を維持する。
+test.beforeEach(async ({ context }) => {
+  await context.route('**/js/reading-config.js', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const READING_SET="long";' }));
+});

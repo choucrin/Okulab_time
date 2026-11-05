@@ -39,10 +39,10 @@ test('長文の基準値が指定コミット全10題の実測と一致する', 
 test('旧短文57件の原文と順序、設定値を保持する', () => {
   assert.equal(PASSAGES.length, 57);
   assert.equal(createHash('sha256').update(JSON.stringify(PASSAGES)).digest('hex'), '574fafed221f3a9c3853af44d6fec15685ecbc0d37c75cc9a569ea6d3b114ada');
-  assert.ok(['long', 'short'].includes(READING_SET));
+  assert.equal(READING_SET, 'aozora');
 });
 test('両データセットの範囲外の既出を除き、全件一巡後も直前の文章を出さない', () => {
-  for (const name of ['long', 'short', 'invalid']) {
+  for (const name of ['long', 'short']) {
     const d = readingDataset(name);
     const original = [null, -1, 10000, 'unknown', {}, d.passages[0].id];
     assert.deepEqual(validShown(original, d.passages), [d.passages[0].id]);
@@ -57,6 +57,12 @@ test('両データセットの範囲外の既出を除き、全件一巡後も�
     assert.notEqual(next.passage.id, history.at(-1));
     assert.equal(original.length, 6);
   }
-  assert.equal(readingDataset('invalid').key, readingDataset('long').key);
+  assert.equal(readingDataset('invalid').key, readingDataset('aozora').key);
   assert.notEqual(readingDataset('short').key, readingDataset('long').key);
+});
+
+test('青空文庫の原典・生成物・ルビ・本文・行構成が一致し、旧長文を保全する', async () => {
+  const { auditAozora } = await import('../tools/aozora-audit.mjs');
+  assert.deepEqual(auditAozora().map(p => [p.rubyCount, p.characters, p.headings]), [[239,14856,0],[215,15358,5]]);
+  assert.equal(createHash('sha256').update(JSON.stringify(LONG_PASSAGES)).digest('hex'), '548f9f7b2255a2e4066aaa7f2019ffc7b7f5fbae8aa54ca7c79343a6eda6ff09');
 });

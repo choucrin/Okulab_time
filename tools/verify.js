@@ -24,6 +24,8 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 // 検査そのものも対象に含める(この道具の欠陥で公開が止まるため)
 const JS_FILES = [
   "js/app.js", "js/clock.js", "js/store.js", "js/passages.js", "js/firebase-config.js",
+  "tools/aozora-convert.mjs", "tools/aozora-audit.mjs",
+  "js/press-button.js", "js/free-label.js", "js/reading-render.js", "js/sequence-watch.js", "js/passages-aozora.js",
   "tools/verify.js", "js/sequence.js", "js/reading.js", "js/reading-config.js", "js/passages-long.js",
 ];
 
@@ -44,6 +46,13 @@ function check(name, fn) {
 function must(condition, message) {
   if (!condition) throw new Error(message);
 }
+
+check("読み物データセットの設定", () => {
+  const config = read("js/reading-config.js");
+  const value = /export const READING_SET = ["']([^"']+)["']/.exec(config)?.[1];
+  must(["aozora", "long", "short"].includes(value), "READING_SETが許可値ではありません");
+  return value;
+});
 
 // ── 1. 構文チェック ──────────────────────────────────────────
 
