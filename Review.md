@@ -746,3 +746,14 @@ a9cb1c2eのReview第3周（保守性・回帰・互換性）を完了しまし�
 - 未検証: 成果物: /tmp/okulab-r3-browser/results.json、html/index.html、test-results/。ログ: /tmp/okulab-r3-browser.log、/tmp/okulab-r3-unit.log、/tmp/okulab-r3-audit.log。Review.mdへの記録は管理側へ引き継ぎます。
 - 未検証: ブラウザ検証はUbuntu WebKit/Chromiumの端末エミュレーションとFirebaseスタブによるものです。iOS・iPadOS・Windows実機、OS連携、実Firebaseの端末間同期、Firestoreルールエンジンの実評価は未検証です。
 - 未検証: 変更したテストを含む候補での独立Test再実施は後続工程です。ルール先行配信・公開・after-merge確認は承認付き別工程であり、実施していません。
+
+<!-- devflow:e7c2aed2-46b4-4ee8-abad-2e6ccacb9190:review:1:db08dbc6febbcb282ef9f0cd7fb14d3a5f15dd50 -->
+
+
+## 2026-11-05T01:24:06.075432+00:00 / review / 周回1
+実行ID: e7c2aed2-46b4-4ee8-abad-2e6ccacb9190
+対象コミット: db08dbc6febbcb282ef9f0cd7fb14d3a5f15dd50
+
+Review第1周（要件と正しさ）完了。必須5チェック成功（単体144件、E2E180件）。軽微1件。候補変更なし。成果物は/tmp/e7c2-review1-browser/と/tmp/e7c2-review1-state.json。
+- minor: R1-001: README.mdの切戻し手順はREADING_SETをlong/shortへ変更して検査しますが、test/reading.test.mjs:42がaozora固定のため失敗します。候補を変更せずlongへ差し替えて終了1を再現しました（/tmp/e7c2-review1-rollback.log）。切戻し後の検査と手順を整合させてください。
+- 未検証: Ubuntu上のWebKit/ChromiumとFirebaseスタブで検証。iPhone・iPad・Windows実機、実OS固有の慣性スクロール・復帰・フォント、実Firebase同期は未検証（今回のPR提出前は任意）。
